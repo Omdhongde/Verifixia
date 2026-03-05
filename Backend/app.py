@@ -88,6 +88,23 @@ def is_video_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in VIDEO_EXTENSIONS
 
 
+def cleanup_old_uploads(max_age_hours: int = 24):
+    """Remove uploaded files older than max_age_hours to prevent disk fill."""
+    try:
+        upload_dir = app.config["UPLOAD_FOLDER"]
+        cutoff = time.time() - max_age_hours * 3600
+        removed = 0
+        for fname in os.listdir(upload_dir):
+            fpath = os.path.join(upload_dir, fname)
+            if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+                os.remove(fpath)
+                removed += 1
+        if removed:
+            logger.info(f"Cleaned up {removed} old upload(s)")
+    except Exception as e:
+        logger.warning(f"Upload cleanup failed: {e}")
+
+
 def predict_deepfake_video():
     """Simple mock prediction for video uploads.
 
@@ -395,6 +412,9 @@ def clear_forensic_logs(user=None, source_type=None):
 @app.route("/api/upload", methods=["POST"])
 def upload_image():
     """Handle image or video upload and deepfake detection with detailed information"""
+    # Periodically remove old uploads to prevent disk bloat
+    cleanup_old_uploads()
+
     upload_field = "image" if "image" in request.files else "file" if "file" in request.files else None
     if not upload_field:
         return jsonify({"error": "No image file provided"}), 400
@@ -682,16 +702,99 @@ def index():
         'message': 'Verifixia AI Backend API',
         'version': '1.0.0',
         'endpoints': {
-            'POST /api/upload': 'Upload image for deepfake detection',
+            'POST /api/upload': 'Upload image/video for deepfake detection',
             'GET /api/logs': 'Get forensic logs (supports pagination/date/source filters)',
             'DELETE /api/logs': 'Clear forensic logs (optional source_type filter)',
             'DELETE /api/logs/<log_id>': 'Delete one forensic log by id',
             'POST /api/live-events': 'Save non-upload live monitoring events',
+            'GET /api/stats': 'Aggregated detection statistics for analytics dashboard',
             'GET /api/database/logs': 'Get detection logs from Neon Database',
             'GET /api/health': 'Health check',
             'GET/PUT /api/auth/profile': 'Authenticated user profile'
         }
     })
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """Aggregate detection statistics derived from local forensic logs."""
+    try:
+        logs = _read_local_logs()
+
+        total = len(logs)
+        fake_logs = [l for l in logs if str(l.get("prediction", "")).lower() == "fake"]
+        real_logs = [l for l in logs if str(l.get("prediction", "")).lower() == "real"]
+        upload_logs = [l for l in logs if l.get("source_type") == "upload"]
+        live_logs = [l for l in logs if l.get("source_type") == "live"]
+
+        # Confidence scores
+        confidences = [
+            float(l["confidence"]) if float(l.get("confidence", 0)) <= 1
+            else float(l.get("confidence", 0)) / 100.0
+            for l in logs if l.get("confidence") is not None
+        ]
+        avg_confidence = round(sum(confidences) / len(confidences) * 100, 1) if confidences else 0.0
+
+        # Latencies
+        latencies = [
+            float(l.get("latency_ms", 0) or l.get("processing_time_ms", 0))
+            for l in logs if (l.get("latency_ms") or l.get("processing_time_ms"))
+        ]
+        avg_latency = round(sum(latencies) / len(latencies), 1) if latencies else 0.0
+
+        # Daily trend (last 7 days)
+        from collections import defaultdict
+        daily: dict = defaultdict(lambda: {"threats": 0, "safe": 0})
+        now = datetime.utcnow()
+        for l in logs:
+            ts = _parse_iso_date(l.get("timestamp"))
+            if not ts:
+                continue
+            delta = (now.date() - ts.date()).days
+            if delta > 6:
+                continue
+            day_key = ts.strftime("%a")
+            pred = str(l.get("prediction", "")).lower()
+            if pred == "fake":
+                daily[day_key]["threats"] += 1
+            else:
+                daily[day_key]["safe"] += 1
+
+        day_order = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        trend = [{"name": d, **daily.get(d, {"threats": 0, "safe": 0})} for d in day_order]
+
+        # Threat type mock breakdown (based on count ratios)
+        fake_total = max(1, len(fake_logs))
+        threat_types = [
+            {"type": "Face Swap",     "count": round(fake_total * 0.42), "percentage": 42},
+            {"type": "Lip Sync",      "count": round(fake_total * 0.28), "percentage": 28},
+            {"type": "Audio Clone",   "count": round(fake_total * 0.16), "percentage": 16},
+            {"type": "Full Synthesis","count": round(fake_total * 0.14), "percentage": 14},
+        ]
+
+        # Source distribution
+        api_calls = max(0, total - len(upload_logs) - len(live_logs))
+        source_distribution = [
+            {"name": "Live Streams",  "value": len(live_logs)},
+            {"name": "File Uploads",  "value": len(upload_logs)},
+            {"name": "API Calls",     "value": api_calls},
+        ]
+
+        return jsonify({
+            "total_scans":      total,
+            "threats_detected": len(fake_logs),
+            "safe_detections":  len(real_logs),
+            "avg_confidence":   avg_confidence,
+            "avg_latency_ms":   avg_latency,
+            "upload_count":     len(upload_logs),
+            "live_count":       len(live_logs),
+            "detection_trend":  trend,
+            "threat_types":     threat_types,
+            "source_distribution": source_distribution,
+        })
+    except Exception as e:
+        logger.error(f"Error computing stats: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @app.route('/api/database/logs', methods=['GET'])
 def get_database_logs():

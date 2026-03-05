@@ -166,6 +166,26 @@ export async function logLiveEvent(payload) {
   return data;
 }
 
+export async function fetchStats() {
+  try {
+    const headers = await buildAuthHeaders();
+    const res = await fetch(`${API_BASE}/api/stats`, { headers });
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error("Invalid response from backend");
+    }
+    if (!res.ok || data?.error) {
+      throw new Error(data?.error || `Backend error: ${res.status}`);
+    }
+    return data;
+  } catch (error) {
+    console.warn("Fetching stats failed, using empty defaults:", error);
+    return null;
+  }
+}
+
 function mockUploadResponse() {
   return new Promise((resolve) => {
     setTimeout(() => {

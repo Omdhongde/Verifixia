@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { title: "Live Monitor", url: "/", icon: Monitor },
   { title: "Forensic Logs", url: "/forensic-logs", icon: FileText },
-  // { title: "Analytics", url: "/analytics", icon: BarChart3 }, // Commented out for future use
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Security Settings", url: "/settings", icon: Settings },
   { title: "Support", url: "/support", icon: HelpCircle },
 ];

@@ -9,7 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
 import ForensicLogs from "./pages/ForensicLogs";
-// import Analytics from "./pages/Analytics"; // Commented out for future use
+import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
 import Support from "./pages/Support";
 import NotFound from "./pages/NotFound";
@@ -46,7 +46,7 @@ const App = () => (
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/forensic-logs" element={<ForensicLogs />} />
-            {/* <Route path="/analytics" element={<Analytics />} /> */} {/* Commented out for future use */}
+            <Route path="/analytics" element={<Analytics />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/support" element={<Support />} />
             <Route path="/profile" element={<Profile />} />

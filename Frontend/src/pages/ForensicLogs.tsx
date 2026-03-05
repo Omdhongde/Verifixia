@@ -9,6 +9,7 @@ import {
   Trash2,
   ChevronsLeft,
   ChevronsRight,
+  FileDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -203,6 +204,37 @@ export const ForensicLogs = () => {
     }
   };
 
+  const handleExportCSV = () => {
+    if (filteredLogs.length === 0) {
+      toast.info("No logs to export");
+      return;
+    }
+    const headers = ["ID", "Timestamp", "Source", "Source Type", "Session ID", "Model Version", "Latency (ms)", "Confidence (%)", "Status", "Action Taken"];
+    const rows = filteredLogs.map((log) => [
+      log.id,
+      log.timestamp,
+      log.source,
+      log.sourceType,
+      log.sessionId,
+      log.modelVersion,
+      log.latencyMs,
+      log.confidenceScore,
+      log.status,
+      log.actionTaken,
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `verifixia_logs_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${filteredLogs.length} log(s) to CSV`);
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -227,6 +259,10 @@ export const ForensicLogs = () => {
                 <Button variant="outline" onClick={loadLogs} disabled={loading}>
                   <Download className="w-4 h-4 mr-2" />
                   Refresh
+                </Button>
+                <Button variant="outline" onClick={handleExportCSV} disabled={loading || filteredLogs.length === 0}>
+                  <FileDown className="w-4 h-4 mr-2" />
+                  Export CSV
                 </Button>
                 <Button variant="destructive" onClick={handleClearLogs} disabled={loading || total === 0}>
                   <Trash2 className="w-4 h-4 mr-2" />

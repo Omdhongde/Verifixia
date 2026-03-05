@@ -1,3 +1,4 @@
+import { useEffect, useState, useCallback } from "react";
 import {
   BarChart3,
   TrendingUp,
@@ -7,13 +8,13 @@ import {
   AlertTriangle,
   CheckCircle,
   Clock,
+  RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import {
-  LineChart,
-  Line,
   AreaChart,
   Area,
   BarChart,
@@ -27,48 +28,97 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { fetchStats } from "../../api";
 
-const detectionTrend = [
-  { name: "Mon", threats: 12, safe: 145 },
-  { name: "Tue", threats: 8, safe: 132 },
-  { name: "Wed", threats: 15, safe: 158 },
-  { name: "Thu", threats: 6, safe: 142 },
-  { name: "Fri", threats: 22, safe: 167 },
-  { name: "Sat", threats: 4, safe: 89 },
-  { name: "Sun", threats: 3, safe: 78 },
+interface Stats {
+  total_scans: number;
+  threats_detected: number;
+  safe_detections: number;
+  avg_confidence: number;
+  avg_latency_ms: number;
+  upload_count: number;
+  live_count: number;
+  detection_trend: { name: string; threats: number; safe: number }[];
+  threat_types: { type: string; count: number; percentage: number }[];
+  source_distribution: { name: string; value: number }[];
+}
+
+const PIE_COLORS = [
+  "hsl(var(--primary))",
+  "hsl(var(--success))",
+  "hsl(var(--warning))",
+  "hsl(var(--muted-foreground))",
 ];
 
-const performanceData = [
-  { name: "00:00", latency: 42, fps: 30 },
-  { name: "04:00", latency: 38, fps: 32 },
-  { name: "08:00", latency: 55, fps: 28 },
-  { name: "12:00", latency: 48, fps: 30 },
-  { name: "16:00", latency: 62, fps: 26 },
-  { name: "20:00", latency: 45, fps: 31 },
-];
-
-const sourceDistribution = [
-  { name: "Live Streams", value: 45, color: "hsl(var(--primary))" },
-  { name: "File Uploads", value: 30, color: "hsl(var(--success))" },
-  { name: "API Calls", value: 15, color: "hsl(var(--warning))" },
-  { name: "Video Conf", value: 10, color: "hsl(var(--muted-foreground))" },
-];
-
-const threatTypes = [
-  { type: "Face Swap", count: 234, percentage: 42 },
-  { type: "Lip Sync", count: 156, percentage: 28 },
-  { type: "Audio Clone", count: 89, percentage: 16 },
-  { type: "Full Synthesis", count: 78, percentage: 14 },
-];
+const EMPTY_STATS: Stats = {
+  total_scans: 0,
+  threats_detected: 0,
+  safe_detections: 0,
+  avg_confidence: 0,
+  avg_latency_ms: 0,
+  upload_count: 0,
+  live_count: 0,
+  detection_trend: ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((n) => ({ name: n, threats: 0, safe: 0 })),
+  threat_types: [
+    { type: "Face Swap", count: 0, percentage: 0 },
+    { type: "Lip Sync", count: 0, percentage: 0 },
+    { type: "Audio Clone", count: 0, percentage: 0 },
+    { type: "Full Synthesis", count: 0, percentage: 0 },
+  ],
+  source_distribution: [
+    { name: "Live Streams", value: 0 },
+    { name: "File Uploads", value: 0 },
+    { name: "API Calls", value: 0 },
+  ],
+};
 
 export const Analytics = () => {
+  const [stats, setStats] = useState<Stats>(EMPTY_STATS);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+
+  const loadStats = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchStats();
+      if (data) {
+        setStats(data);
+        setLastUpdated(new Date().toLocaleTimeString());
+      }
+    } catch (err) {
+      console.error("Failed to load stats", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
+
+  const threatRate =
+    stats.total_scans > 0
+      ? Math.round((stats.threats_detected / stats.total_scans) * 1000) / 10
+      : 0;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Analytics Dashboard</h1>
-        <p className="text-muted-foreground">
-          Comprehensive insights into detection performance
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Analytics Dashboard</h1>
+          <p className="text-muted-foreground">
+            Live insights from your real detection history
+            {lastUpdated && (
+              <span className="ml-2 text-xs font-mono text-muted-foreground/60">
+                — refreshed {lastUpdated}
+              </span>
+            )}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={loadStats} disabled={loading}>
+          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
       </div>
 
       {/* Key Metrics */}
@@ -78,16 +128,17 @@ export const Analytics = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Scans</p>
-                <p className="text-3xl font-bold">24,847</p>
+                <p className="text-3xl font-bold">{stats.total_scans.toLocaleString()}</p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Activity className="w-6 h-6 text-primary" />
               </div>
             </div>
             <div className="flex items-center gap-1 mt-2 text-sm">
-              <TrendingUp className="w-4 h-4 text-success" />
-              <span className="text-success">+12.5%</span>
-              <span className="text-muted-foreground">vs last week</span>
+              <BarChart3 className="w-4 h-4 text-muted-foreground" />
+              <span className="text-muted-foreground">
+                {stats.upload_count} uploads · {stats.live_count} live
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -96,17 +147,25 @@ export const Analytics = () => {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Threats Blocked</p>
-                <p className="text-3xl font-bold text-destructive">156</p>
+                <p className="text-sm text-muted-foreground">Threats Detected</p>
+                <p className="text-3xl font-bold text-destructive">
+                  {stats.threats_detected.toLocaleString()}
+                </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-destructive/10 flex items-center justify-center">
                 <AlertTriangle className="w-6 h-6 text-destructive" />
               </div>
             </div>
             <div className="flex items-center gap-1 mt-2 text-sm">
-              <TrendingDown className="w-4 h-4 text-success" />
-              <span className="text-success">-8.3%</span>
-              <span className="text-muted-foreground">vs last week</span>
+              {threatRate > 0 ? (
+                <TrendingUp className="w-4 h-4 text-destructive" />
+              ) : (
+                <TrendingDown className="w-4 h-4 text-success" />
+              )}
+              <span className={threatRate > 0 ? "text-destructive" : "text-success"}>
+                {threatRate}%
+              </span>
+              <span className="text-muted-foreground"> threat rate</span>
             </div>
           </CardContent>
         </Card>
@@ -115,17 +174,19 @@ export const Analytics = () => {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Accuracy Rate</p>
-                <p className="text-3xl font-bold text-success">98.7%</p>
+                <p className="text-sm text-muted-foreground">Safe Detections</p>
+                <p className="text-3xl font-bold text-success">
+                  {stats.safe_detections.toLocaleString()}
+                </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-success/10 flex items-center justify-center">
                 <CheckCircle className="w-6 h-6 text-success" />
               </div>
             </div>
             <div className="flex items-center gap-1 mt-2 text-sm">
-              <TrendingUp className="w-4 h-4 text-success" />
-              <span className="text-success">+0.3%</span>
-              <span className="text-muted-foreground">vs last week</span>
+              <Shield className="w-4 h-4 text-success" />
+              <span className="text-success">{stats.avg_confidence}%</span>
+              <span className="text-muted-foreground"> avg confidence</span>
             </div>
           </CardContent>
         </Card>
@@ -135,16 +196,18 @@ export const Analytics = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Avg Response</p>
-                <p className="text-3xl font-bold">42ms</p>
+                <p className="text-3xl font-bold">
+                  {stats.avg_latency_ms > 0 ? `${stats.avg_latency_ms}ms` : "—"}
+                </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-warning/10 flex items-center justify-center">
                 <Clock className="w-6 h-6 text-warning" />
               </div>
             </div>
             <div className="flex items-center gap-1 mt-2 text-sm">
-              <TrendingUp className="w-4 h-4 text-success" />
-              <span className="text-success">-5ms</span>
-              <span className="text-muted-foreground">improvement</span>
+              <span className="text-muted-foreground">
+                {stats.avg_latency_ms > 0 ? "model inference latency" : "no timing data yet"}
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -155,12 +218,12 @@ export const Analytics = () => {
         <Card className="glass-card border-border/50">
           <CardHeader>
             <CardTitle>Detection Trend</CardTitle>
-            <CardDescription>Weekly threat vs safe detection comparison</CardDescription>
+            <CardDescription>Threat vs. safe detections — last 7 days</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={detectionTrend}>
+                <AreaChart data={stats.detection_trend}>
                   <defs>
                     <linearGradient id="safeGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.3} />
@@ -173,7 +236,7 @@ export const Analytics = () => {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} allowDecimals={false} />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
@@ -181,20 +244,8 @@ export const Analytics = () => {
                       borderRadius: "8px",
                     }}
                   />
-                  <Area
-                    type="monotone"
-                    dataKey="safe"
-                    stroke="hsl(var(--success))"
-                    fill="url(#safeGradient)"
-                    strokeWidth={2}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="threats"
-                    stroke="hsl(var(--destructive))"
-                    fill="url(#threatGradient)"
-                    strokeWidth={2}
-                  />
+                  <Area type="monotone" dataKey="safe" stroke="hsl(var(--success))" fill="url(#safeGradient)" strokeWidth={2} name="Safe" />
+                  <Area type="monotone" dataKey="threats" stroke="hsl(var(--destructive))" fill="url(#threatGradient)" strokeWidth={2} name="Threats" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -204,24 +255,16 @@ export const Analytics = () => {
         <Card className="glass-card border-border/50">
           <CardHeader>
             <CardTitle>Source Distribution</CardTitle>
-            <CardDescription>Detection requests by source type</CardDescription>
+            <CardDescription>Requests broken down by source type</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[300px] flex items-center gap-6">
               <div className="flex-1">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie
-                      data={sourceDistribution}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={4}
-                      dataKey="value"
-                    >
-                      {sourceDistribution.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
+                    <Pie data={stats.source_distribution} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={4} dataKey="value">
+                      {stats.source_distribution.map((_, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                       ))}
                     </Pie>
                     <Tooltip
@@ -234,19 +277,18 @@ export const Analytics = () => {
                   </PieChart>
                 </ResponsiveContainer>
               </div>
-              <div className="space-y-3">
-                {sourceDistribution.map((item) => (
-                  <div key={item.name} className="flex items-center gap-3">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: item.color }}
-                    />
-                    <span className="text-sm">{item.name}</span>
-                    <span className="text-sm font-mono text-muted-foreground ml-auto">
-                      {item.value}%
-                    </span>
-                  </div>
-                ))}
+              <div className="space-y-3 min-w-[140px]">
+                {stats.source_distribution.map((item, i) => {
+                  const total = stats.source_distribution.reduce((s, x) => s + x.value, 0);
+                  const pct = total > 0 ? Math.round((item.value / total) * 100) : 0;
+                  return (
+                    <div key={item.name} className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
+                      <span className="text-sm">{item.name}</span>
+                      <span className="text-sm font-mono text-muted-foreground ml-auto">{item.value} ({pct}%)</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </CardContent>
@@ -257,16 +299,16 @@ export const Analytics = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="glass-card border-border/50">
           <CardHeader>
-            <CardTitle>System Performance</CardTitle>
-            <CardDescription>Latency and frame rate over 24 hours</CardDescription>
+            <CardTitle>Weekly Bar Comparison</CardTitle>
+            <CardDescription>Daily threats vs. safe detections</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={performanceData}>
+                <BarChart data={stats.detection_trend} barCategoryGap="30%">
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} allowDecimals={false} />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
@@ -274,23 +316,9 @@ export const Analytics = () => {
                       borderRadius: "8px",
                     }}
                   />
-                  <Line
-                    type="monotone"
-                    dataKey="latency"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth={2}
-                    dot={{ fill: "hsl(var(--primary))" }}
-                    name="Latency (ms)"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="fps"
-                    stroke="hsl(var(--success))"
-                    strokeWidth={2}
-                    dot={{ fill: "hsl(var(--success))" }}
-                    name="FPS"
-                  />
-                </LineChart>
+                  <Bar dataKey="safe" fill="hsl(var(--success))" name="Safe" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="threats" fill="hsl(var(--destructive))" name="Threats" radius={[4, 4, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
@@ -299,11 +327,11 @@ export const Analytics = () => {
         <Card className="glass-card border-border/50">
           <CardHeader>
             <CardTitle>Threat Categories</CardTitle>
-            <CardDescription>Breakdown by deepfake technique</CardDescription>
+            <CardDescription>Estimated breakdown by deepfake technique</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {threatTypes.map((threat) => (
+              {stats.threat_types.map((threat) => (
                 <div key={threat.type} className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <span>{threat.type}</span>
@@ -314,10 +342,47 @@ export const Analytics = () => {
                   <Progress value={threat.percentage} className="h-2" />
                 </div>
               ))}
+              {stats.threats_detected === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No threats detected yet. Upload or monitor media to populate this chart.
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Summary Badges */}
+      <Card className="glass-card border-border/50">
+        <CardHeader>
+          <CardTitle>Quick Summary</CardTitle>
+          <CardDescription>At-a-glance system health based on real data</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-3">
+            <Badge variant="outline" className="px-4 py-2 text-sm">
+              <Activity className="w-4 h-4 mr-2" />
+              {stats.total_scans} total scans
+            </Badge>
+            <Badge variant="outline" className="px-4 py-2 text-sm border-destructive/50 text-destructive">
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              {stats.threats_detected} deepfakes caught
+            </Badge>
+            <Badge variant="outline" className="px-4 py-2 text-sm border-success/50 text-success">
+              <CheckCircle className="w-4 h-4 mr-2" />
+              {stats.safe_detections} verified authentic
+            </Badge>
+            <Badge variant="outline" className="px-4 py-2 text-sm">
+              <Clock className="w-4 h-4 mr-2" />
+              {stats.avg_latency_ms > 0 ? `${stats.avg_latency_ms}ms avg latency` : "No latency data yet"}
+            </Badge>
+            <Badge variant="outline" className="px-4 py-2 text-sm">
+              <Shield className="w-4 h-4 mr-2" />
+              {stats.avg_confidence}% avg confidence
+            </Badge>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };
