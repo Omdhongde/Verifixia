@@ -19,5 +19,10 @@ source "$VENV_DIR/bin/activate"
 python3 -m pip install --upgrade pip
 pip install -r requirements.txt
 
+echo ""
+echo "✅ Backend ready. Starting on http://localhost:3001 ..."
+echo "   (PyTorch optional – using heuristic mode if not installed)"
+echo ""
+
 # Run backend
 exec python3 app.py

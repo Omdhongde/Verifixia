@@ -3,7 +3,7 @@ from flask_cors import CORS
 import os
 import uuid
 from werkzeug.utils import secure_filename
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 from dotenv import load_dotenv
@@ -51,8 +51,11 @@ except Exception as e:
 
 # Model configuration
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "xception_deepfake.pth")
+SKLEARN_MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "deepfake_sklearn.pkl")
 PYTORCH_AVAILABLE = False
+SKLEARN_AVAILABLE = False
 model = None
+sklearn_model = None
 DEVICE = "cpu"
 model_info = {}
 
@@ -60,24 +63,58 @@ model_info = {}
 try:
     import torch
     from utils.model_utils import ModelUtils
-    
+
     PYTORCH_AVAILABLE = True
     logger.info("PyTorch is available. Attempting to load model...")
-    
-    # Load the model
+
     model, DEVICE = ModelUtils.load_model(MODEL_PATH)
     model_info = ModelUtils.get_model_info(MODEL_PATH)
     model_metadata = ModelUtils.get_model_metadata(model, DEVICE)
     model_info.update(model_metadata)
-    
+
     logger.info(f"Model loaded successfully on device: {DEVICE}")
     logger.info(f"Model info: {model_info}")
-    
+
 except Exception as e:
     logger.warning(f"Could not load PyTorch model: {e}")
-    logger.warning("Falling back to heuristic-based predictions")
+    logger.warning("Checking for scikit-learn model …")
     PYTORCH_AVAILABLE = False
     model = None
+
+# Try to load scikit-learn model (trained via scripts/train_sklearn.py)
+if not PYTORCH_AVAILABLE:
+    try:
+        import pickle
+        import numpy as np
+        from PIL import ImageStat as _ImageStat  # already imported above
+
+        if os.path.exists(SKLEARN_MODEL_PATH):
+            with open(SKLEARN_MODEL_PATH, "rb") as _f:
+                sklearn_model = pickle.load(_f)
+            SKLEARN_AVAILABLE = True
+            model_info = {
+                "model_name": "Verifixia AI SVM Detector",
+                "version": "1.0.0",
+                "architecture": "SVM + HOG/Colour features",
+                "input_size": f"{sklearn_model.get('img_size', (128,128))}",
+                "framework": "scikit-learn",
+                "exists": True,
+                "path": SKLEARN_MODEL_PATH,
+                "status": "loaded",
+            }
+            logger.info("✓ scikit-learn model loaded successfully")
+        else:
+            logger.warning(
+                f"No sklearn model found at {SKLEARN_MODEL_PATH}. "
+                "Run: python scripts/train_sklearn.py"
+            )
+    except Exception as e:
+        logger.warning(f"Could not load scikit-learn model: {e}")
+        SKLEARN_AVAILABLE = False
+        sklearn_model = None
+
+if not PYTORCH_AVAILABLE and not SKLEARN_AVAILABLE:
+    logger.warning("No trained model available – using heuristic fallback.")
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -105,6 +142,122 @@ def cleanup_old_uploads(max_age_hours: int = 24):
         logger.warning(f"Upload cleanup failed: {e}")
 
 
+def predict_deepfake_sklearn(image_path: str) -> dict:
+    """Run prediction using the trained scikit-learn SVM model."""
+    import numpy as np
+    from PIL import Image as _Image
+
+    bundle = sklearn_model
+    clf    = bundle["classifier"]
+    scaler = bundle["scaler"]
+    size   = bundle.get("img_size", (128, 128))
+
+    # ── Replicate feature extraction from train_sklearn.py ──
+    img = _Image.open(image_path).convert("RGB")
+    img_r = img.resize(size)
+    arr = np.array(img_r, dtype=np.uint8)
+
+    # HOG (minimal, same as training)
+    gray = np.array(img_r.convert("L"), dtype=np.uint8)
+
+    def _hog(g, cell=8, block=2, bins=9):
+        h, w = g.shape
+        gx = np.zeros_like(g, dtype=np.float32)
+        gy = np.zeros_like(g, dtype=np.float32)
+        gx[:, 1:-1] = g[:, 2:].astype(np.float32) - g[:, :-2].astype(np.float32)
+        gy[1:-1, :] = g[2:, :].astype(np.float32) - g[:-2, :].astype(np.float32)
+        mag = np.sqrt(gx**2 + gy**2)
+        ang = (np.arctan2(gy, gx) * 180 / np.pi) % 180
+        cy, cx = h // cell, w // cell
+        hist = np.zeros((cy, cx, bins), dtype=np.float32)
+        bw = 180.0 / bins
+        for bi in range(bins):
+            lo, hi = bi * bw, (bi + 1) * bw
+            mask = (ang >= lo) & (ang < hi)
+            for r in range(cy):
+                for c in range(cx):
+                    pm = mask[r*cell:(r+1)*cell, c*cell:(c+1)*cell]
+                    pm2 = mag[r*cell:(r+1)*cell, c*cell:(c+1)*cell]
+                    hist[r, c, bi] = pm2[pm].sum()
+        feats = []
+        for r in range(cy - block + 1):
+            for c in range(cx - block + 1):
+                bh = hist[r:r+block, c:c+block, :].ravel()
+                bn = np.sqrt((bh**2).sum() + 1e-6)
+                feats.append(bh / bn)
+        return np.concatenate(feats)
+
+    hog_f = _hog(gray)
+
+    rgb_hist = []
+    for ch in range(3):
+        h2, _ = np.histogram(arr[:, :, ch], bins=32, range=(0, 256))
+        rgb_hist.append(h2 / (h2.sum() + 1e-6))
+    rgb_hist = np.concatenate(rgb_hist)
+
+    lab_hist = []
+    try:
+        lab_arr = np.array(img_r.convert("LAB"))
+    except Exception:
+        lab_arr = arr
+    for ch in range(3):
+        h3, _ = np.histogram(lab_arr[:, :, ch], bins=16, range=(0, 256))
+        lab_hist.append(h3 / (h3.sum() + 1e-6))
+    lab_hist = np.concatenate(lab_hist)
+
+    stats = []
+    for ch in range(3):
+        cd = arr[:, :, ch].astype(np.float32) / 255.0
+        mu = cd.mean()
+        std = cd.std()
+        skew = float(np.mean(((cd - mu) / (std + 1e-6))**3))
+        kurt = float(np.mean(((cd - mu) / (std + 1e-6))**4))
+        stats.extend([mu, std, skew, kurt])
+    stats = np.array(stats, dtype=np.float32)
+
+    f = np.fft.rfft2(gray.astype(np.float32))
+    fabs = np.abs(f).ravel()
+    fabs_s = np.sort(fabs)[::-1][:64]
+    fabs_f = fabs_s / (fabs_s.max() + 1e-6)
+
+    feat = np.concatenate([hog_f, rgb_hist, lab_hist, stats, fabs_f]).astype(np.float32)
+    feat_scaled = scaler.transform(feat.reshape(1, -1))
+
+    confidence_raw = float(clf.predict_proba(feat_scaled)[0][1])
+    prediction = "Fake" if confidence_raw > 0.5 else "Real"
+    confidence_pct = confidence_raw * 100 if prediction == "Fake" else (1 - confidence_raw) * 100
+
+    if confidence_raw > 0.7:
+        threat = "high"
+    elif confidence_raw > 0.4:
+        threat = "medium"
+    else:
+        threat = "low"
+
+    return {
+        "prediction": prediction,
+        "confidence": confidence_pct,
+        "confidence_raw": confidence_raw,
+        "threat_level": threat,
+        "model_used": "Verifixia AI SVM Detector v1.0",
+        "processing_time": {"preprocessing_ms": 0, "inference_ms": 0, "total_ms": 0},
+        "analysis": {
+            "level": "SVM Classifier",
+            "description": "HOG + colour feature SVM trained on project dataset",
+            "recommendation": (
+                "Content flagged for review" if prediction == "Fake"
+                else "Content appears authentic"
+            ),
+        },
+        "model_info": {
+            "architecture": "SVM + RBF kernel",
+            "input_size": f"{size[0]}x{size[1]}",
+            "framework": "scikit-learn",
+            "device": "cpu",
+        },
+    }
+
+
 def predict_deepfake_video():
     """Simple mock prediction for video uploads.
 
@@ -117,12 +270,12 @@ def predict_deepfake_video():
     return prediction, confidence
 
 def predict_deepfake(image_path):
-    """Predict if image is deepfake using PyTorch model or fallback to heuristics"""
-    
+    """Predict if image is deepfake – tries PyTorch → sklearn → heuristic."""
+
+    # Tier 1: PyTorch deep learning model
     if PYTORCH_AVAILABLE and model is not None:
         try:
             from utils.model_utils import ModelUtils
-            
             # Preprocess image
             image_tensor, preprocessing_time = ModelUtils.preprocess_image(image_path)
             
@@ -160,10 +313,21 @@ def predict_deepfake(image_path):
             
         except Exception as e:
             logger.error(f"Error making model prediction: {e}")
+            logger.warning("Falling back to sklearn / heuristic prediction")
+            # Fall through to next tier
+
+    # Tier 2: scikit-learn SVM model (trained via scripts/train_sklearn.py)
+    if SKLEARN_AVAILABLE and sklearn_model is not None:
+        try:
+            result = predict_deepfake_sklearn(image_path)
+            logger.info(f"sklearn Prediction: {result['prediction']}, "
+                        f"Confidence: {result['confidence']:.2f}%")
+            return result
+        except Exception as e:
+            logger.error(f"sklearn prediction failed: {e}")
             logger.warning("Falling back to heuristic prediction")
-            # Fall through to heuristic method
-    
-    # Fallback: Heuristic-based prediction
+
+    # Tier 3: Heuristic-based prediction
     try:
         img = Image.open(image_path).convert("L")  # grayscale
         stat = ImageStat.Stat(img)
@@ -288,7 +452,7 @@ def _append_local_log(log_entry):
 def save_forensic_log(log_entry, user=None):
     entry = dict(log_entry)
     entry.setdefault("id", str(uuid.uuid4()))
-    entry.setdefault("timestamp", datetime.utcnow().isoformat())
+    entry.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
     if user and user.get("uid"):
         entry["user_id"] = user.get("uid")
         entry["user_email"] = user.get("email")
@@ -476,7 +640,7 @@ def upload_image():
         session_id = request.form.get("session_id") or str(uuid.uuid4())
         processing_time = result.get("processing_time", {}) or {}
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "filename": unique_filename,
             "prediction": result.get("prediction"),
             "confidence": result.get("confidence"),
@@ -596,7 +760,7 @@ def create_live_event():
         latency_ms = payload.get("latency_ms", 0)
 
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "filename": source,
             "prediction": prediction,
             "confidence": confidence if isinstance(confidence, (int, float)) else 0,
@@ -630,13 +794,20 @@ def health_check():
     """Health check endpoint with detailed model information"""
     if PYTORCH_AVAILABLE:
         device_info = str(DEVICE)
+        active_model = "pytorch"
+    elif SKLEARN_AVAILABLE:
+        device_info = "cpu (sklearn)"
+        active_model = "sklearn"
     else:
-        device_info = "cpu (mock mode)"
+        device_info = "cpu (heuristic fallback)"
+        active_model = "heuristic"
 
     return jsonify({
         'status': 'healthy',
         'pytorch_available': PYTORCH_AVAILABLE,
-        'model_loaded': model is not None,
+        'sklearn_available': SKLEARN_AVAILABLE,
+        'active_model': active_model,
+        'model_loaded': model is not None or sklearn_model is not None,
         'device': device_info,
         'model_info': model_info if model_info else None,
         'firebase_enabled': firebase_service.enabled
@@ -646,15 +817,15 @@ def health_check():
 def get_model_info():
     """Get detailed model information"""
     if model is not None and PYTORCH_AVAILABLE:
-        return jsonify({
-            'status': 'loaded',
-            'info': model_info
-        })
+        return jsonify({'status': 'loaded', 'type': 'pytorch', 'info': model_info})
+    elif sklearn_model is not None and SKLEARN_AVAILABLE:
+        return jsonify({'status': 'loaded', 'type': 'sklearn', 'info': model_info})
     else:
         return jsonify({
             'status': 'not_loaded',
-            'message': 'Model not available. Using fallback predictions.',
-            'pytorch_available': PYTORCH_AVAILABLE
+            'message': 'No trained model found. Run: python scripts/train_sklearn.py',
+            'pytorch_available': PYTORCH_AVAILABLE,
+            'sklearn_available': SKLEARN_AVAILABLE,
         })
 
 
@@ -744,7 +915,7 @@ def get_stats():
         # Daily trend (last 7 days)
         from collections import defaultdict
         daily: dict = defaultdict(lambda: {"threats": 0, "safe": 0})
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for l in logs:
             ts = _parse_iso_date(l.get("timestamp"))
             if not ts:

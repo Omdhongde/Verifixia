@@ -10,8 +10,11 @@ Pillow==12.1.0
 #   python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 # For GPUs or other platforms, follow: https://pytorch.org/get-started/locally/
 # transformers is optional but useful for some pipelines; install if needed:
-transformers
+# transformers
 firebase-admin==7.1.0
-psycopg2-binary==2.9.9
+# psycopg2-binary has no wheel for Python 3.14+. Use psycopg v3 instead:
+#   pip install "psycopg[binary]"
+# psycopg2-binary==2.9.9  # only works on Python <=3.13
+psycopg[binary]
 # torch
 # torchvision

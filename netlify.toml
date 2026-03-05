@@ -15,6 +15,7 @@
     X-Content-Type-Options = "nosniff"
     X-XSS-Protection = "1; mode=block"
     Cache-Control = "public, max-age=3600"
+    Strict-Transport-Security: max-age=31536000;
 
 [build.environment]
   NODE_VERSION = "18"

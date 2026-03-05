@@ -1,66 +1,80 @@
 # Model utilities and helper functions
 
-import torch
-import torch.nn as nn
-from torchvision import transforms
-from PIL import Image
-import numpy as np
 import os
 import time
 from typing import Dict, Tuple, Optional, Any
 
-class DeepfakeDetector(nn.Module):
-    """Xception-based deepfake detection model"""
-    def __init__(self):
-        super(DeepfakeDetector, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, 3, 2, 0)
-        self.bn1 = nn.BatchNorm2d(32)
-        self.relu = nn.ReLU(inplace=True)
+try:
+    import torch
+    import torch.nn as nn
+    from torchvision import transforms
+    from PIL import Image
+    import numpy as np
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
+    # Stub so the rest of the module doesn't fail at import time
+    nn = None
+    torch = None
 
-        # Entry flow
-        self.conv2 = nn.Conv2d(32, 64, 3, 1, 1)
-        self.bn2 = nn.BatchNorm2d(64)
 
-        # Middle flow (simplified)
-        self.conv3 = nn.Conv2d(64, 128, 3, 2, 1)
-        self.bn3 = nn.BatchNorm2d(128)
+if _TORCH_AVAILABLE:
+    class DeepfakeDetector(nn.Module):
+        """Xception-based deepfake detection model"""
+        def __init__(self):
+            super(DeepfakeDetector, self).__init__()
+            self.conv1 = nn.Conv2d(3, 32, 3, 2, 0)
+            self.bn1 = nn.BatchNorm2d(32)
+            self.relu = nn.ReLU(inplace=True)
 
-        self.conv4 = nn.Conv2d(128, 256, 3, 1, 1)
-        self.bn4 = nn.BatchNorm2d(256)
+            # Entry flow
+            self.conv2 = nn.Conv2d(32, 64, 3, 1, 1)
+            self.bn2 = nn.BatchNorm2d(64)
 
-        # Exit flow
-        self.conv5 = nn.Conv2d(256, 512, 3, 2, 1)
-        self.bn5 = nn.BatchNorm2d(512)
+            # Middle flow (simplified)
+            self.conv3 = nn.Conv2d(64, 128, 3, 2, 1)
+            self.bn3 = nn.BatchNorm2d(128)
 
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.dropout = nn.Dropout(0.5)
-        self.fc = nn.Linear(512, 1)
-        self.sigmoid = nn.Sigmoid()
+            self.conv4 = nn.Conv2d(128, 256, 3, 1, 1)
+            self.bn4 = nn.BatchNorm2d(256)
 
-    def forward(self, x):
-        # Entry flow
-        x = self.relu(self.bn1(self.conv1(x)))
-        x = self.relu(self.bn2(self.conv2(x)))
+            # Exit flow
+            self.conv5 = nn.Conv2d(256, 512, 3, 2, 1)
+            self.bn5 = nn.BatchNorm2d(512)
 
-        # Middle flow
-        x = self.relu(self.bn3(self.conv3(x)))
-        x = self.relu(self.bn4(self.conv4(x)))
+            self.global_pool = nn.AdaptiveAvgPool2d(1)
+            self.dropout = nn.Dropout(0.5)
+            self.fc = nn.Linear(512, 1)
+            self.sigmoid = nn.Sigmoid()
 
-        # Exit flow
-        x = self.relu(self.bn5(self.conv5(x)))
+        def forward(self, x):
+            # Entry flow
+            x = self.relu(self.bn1(self.conv1(x)))
+            x = self.relu(self.bn2(self.conv2(x)))
 
-        x = self.global_pool(x)
-        x = x.view(x.size(0), -1)
-        x = self.dropout(x)
-        x = self.fc(x)
-        return self.sigmoid(x)
+            # Middle flow
+            x = self.relu(self.bn3(self.conv3(x)))
+            x = self.relu(self.bn4(self.conv4(x)))
+
+            # Exit flow
+            x = self.relu(self.bn5(self.conv5(x)))
+
+            x = self.global_pool(x)
+            x = x.view(x.size(0), -1)
+            x = self.dropout(x)
+            x = self.fc(x)
+            return self.sigmoid(x)
+else:
+    class DeepfakeDetector:  # type: ignore[no-redef]
+        """Stub when PyTorch is unavailable"""
+        pass
 
 
 class ModelUtils:
     """Utility class for model operations"""
 
     @staticmethod
-    def load_model(model_path: str, device: Optional[torch.device] = None) -> Tuple[DeepfakeDetector, torch.device]:
+    def load_model(model_path: str, device: Optional[Any] = None) -> Tuple[Any, Any]:
         """Load a trained model with error handling"""
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -80,7 +94,7 @@ class ModelUtils:
         return model, device
 
     @staticmethod
-    def preprocess_image(image_path: str, image_size: int = 299) -> Tuple[torch.Tensor, float]:
+    def preprocess_image(image_path: str, image_size: int = 299) -> Tuple[Any, float]:
         """Preprocess image for model input and return preprocessing time"""
         start_time = time.time()
         
@@ -97,7 +111,7 @@ class ModelUtils:
         return tensor, preprocessing_time
 
     @staticmethod
-    def predict_image(model: DeepfakeDetector, image_tensor: torch.Tensor, device: torch.device) -> Dict[str, Any]:
+    def predict_image(model: Any, image_tensor: Any, device: Any) -> Dict[str, Any]:
         """Make prediction with detailed information"""
         start_time = time.time()
         
@@ -163,7 +177,7 @@ class ModelUtils:
         return info
 
     @staticmethod
-    def get_model_metadata(model: DeepfakeDetector, device: torch.device) -> Dict[str, Any]:
+    def get_model_metadata(model: Any, device: Any) -> Dict[str, Any]:
         """Get detailed model metadata including parameter count"""
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
