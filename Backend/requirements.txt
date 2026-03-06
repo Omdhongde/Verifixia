@@ -1,20 +1,60 @@
+# ─────────────────────────────────────────────
+#  Verifixia – Backend Python Dependencies
+#  Python 3.10 – 3.14 compatible
+# ─────────────────────────────────────────────
+
+# ── Web Framework ─────────────────────────────
 Flask==3.1.2
 Flask-CORS==6.0.2
+Werkzeug>=3.1.0
+
+# ── Environment & Config ──────────────────────
 python-dotenv==1.2.1
+
+# ── Image Processing ──────────────────────────
 Pillow==12.1.0
-# Note: PyTorch and torchvision are large platform-specific packages and are
-# intentionally left commented out here to avoid long or failing installs.
-# Install PyTorch separately following the official instructions for your
-# platform. For many macOS/Linux CPU-only setups you can run:
-#   python3 -m pip install --upgrade pip
-#   python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-# For GPUs or other platforms, follow: https://pytorch.org/get-started/locally/
-# transformers is optional but useful for some pipelines; install if needed:
-# transformers
+
+# ── Database (PostgreSQL) ─────────────────────
+# psycopg v3  – works on Python 3.10-3.14
+# (psycopg2-binary has NO wheel for Python 3.14+)
+psycopg[binary]>=3.1.0
+
+# ── Firebase (optional) ───────────────────────
+# Remove if you are not using Firebase Auth / Firestore
 firebase-admin==7.1.0
-# psycopg2-binary has no wheel for Python 3.14+. Use psycopg v3 instead:
-#   pip install "psycopg[binary]"
-# psycopg2-binary==2.9.9  # only works on Python <=3.13
-psycopg[binary]
-# torch
-# torchvision
+
+# ── ML – scikit-learn stack ───────────────────
+# Required to train / run the SVM deepfake detector
+scikit-learn>=1.4.0
+numpy>=1.26.0
+scipy>=1.12.0
+
+# ── ML – scikit-image (optional, improves HOG) ─
+# Used in scripts/train_sklearn.py if available
+scikit-image>=0.22.0
+
+# ── ML – HuggingFace stack (optional) ─────────
+# Only needed for Backend/pytorch/train_hf.py
+# and scripts/download_data.py / find_real_data.py
+# Install these separately when fine-tuning:
+#   pip install -r requirements-ml.txt
+# datasets>=2.18.0
+# transformers>=4.40.0
+# evaluate>=0.4.0
+# accelerate>=0.29.0
+
+# ── ML – PyTorch (optional, CPU or GPU) ────────
+# PyTorch wheels are platform-specific; install separately:
+#
+#   CPU (macOS / Linux):
+#     pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+#
+#   CUDA 12.x (Linux):
+#     pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision
+#
+#   Apple Silicon MPS:
+#     pip install torch torchvision          # uses default PyPI wheel
+#
+# See: https://pytorch.org/get-started/locally/
+# torch>=2.2.0
+# torchvision>=0.17.0

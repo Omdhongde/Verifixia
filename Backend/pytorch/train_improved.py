@@ -242,8 +242,16 @@ def main():
     parser.add_argument('--config', type=str, default='config.yaml', help='Path to config file')
     args = parser.parse_args()
 
+    # Sanitize and validate the config file path to prevent path traversal
+    config_path = os.path.realpath(args.config)
+    allowed_base = os.path.realpath(os.path.dirname(os.path.abspath(__file__)))
+    if not config_path.startswith(allowed_base):
+        raise ValueError(f"Config path '{config_path}' is outside the allowed directory.")
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
     # Load configuration
-    with open(args.config, 'r') as f:
+    with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
     # Create models directory if it doesn't exist

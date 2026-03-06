@@ -999,8 +999,11 @@ if __name__ == '__main__':
     # load_model()
 
     # Run the app on port 3001 instead of 5000
+    # Debug mode is controlled via FLASK_DEBUG env variable (default: off for security)
+    import os as _os
+    _debug = _os.environ.get('FLASK_DEBUG', 'false').lower() in ('1', 'true', 'yes')
     app.run(
         host='0.0.0.0',
         port=3001,
-        debug=True
+        debug=_debug
     )

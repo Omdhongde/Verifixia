@@ -1,0 +1,21 @@
+# ─────────────────────────────────────────────
+#  Verifixia – Optional ML / Training Dependencies
+#  Install ONLY when running training scripts or
+#  fine-tuning via Backend/pytorch/train_hf.py
+# ─────────────────────────────────────────────
+
+# ── Core requirements (already in requirements.txt) ──
+-r requirements.txt
+
+# ── HuggingFace ecosystem ─────────────────────
+datasets>=2.18.0
+transformers>=4.40.0
+evaluate>=0.4.0
+accelerate>=0.29.0
+
+# ── PyTorch ───────────────────────────────────
+# See requirements.txt comments for platform-specific
+# install instructions. Example (CPU):
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+torch>=2.2.0
+torchvision>=0.17.0

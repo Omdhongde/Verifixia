@@ -1,148 +1,199 @@
 """
-Verifixia – Deepfake Detector Training (scikit-learn, runs on any Python)
-=========================================================================
-Uses HOG + colour-histogram features with an SVM + calibration.
-Works WITHOUT PyTorch/TensorFlow – just scikit-learn + Pillow + numpy.
+Verifixia – Deepfake Detector Training  (scikit-learn, any Python version)
+===========================================================================
+Trains an ensemble (SVM + GradientBoosting) on rich image features:
+  • HOG (scikit-image if available, else pure-numpy fallback)
+  • Multi-scale RGB + LAB colour histograms
+  • DCT frequency features (top-128 coefficients)
+  • Statistical moments per channel (mean/std/skew/kurt)
+  • Pixel-difference texture (LBP-lite)
 
-Produces:  models/deepfake_sklearn.pkl   (used by the backend automatically)
-           models/xception_deepfake.pth  is NOT produced by this script –
-           see scripts/train_pytorch.py for the full deep-learning version
-           (requires Python ≤ 3.12 or a Linux/Colab environment).
+Works on Python 3.13/3.14 without PyTorch or TensorFlow.
 
 Usage (from repo root):
-    python scripts/train_sklearn.py
+    python scripts/train_sklearn.py                 # defaults
+    python scripts/train_sklearn.py --n_aug 5       # less aug, faster
+    python scripts/train_sklearn.py --n_aug 10      # more aug, better model
 
-Optional flags:
-    --data_dir  PATH     (default: ./DATA)
-    --out       PATH     (default: ./models/deepfake_sklearn.pkl)
-    --n_aug     INT      Augmentation copies per image (default: 8)
+Output:  models/deepfake_sklearn.pkl
 """
 
 import argparse
 import os
+import pickle
 import random
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-# ── Feature extractor ──────────────────────────────────────────────────────
-IMG_SIZE = (128, 128)   # resize before feature extraction
+# ── Optional scikit-image HOG (faster & better than pure-numpy) ───────────
+try:
+    from skimage.feature import hog as ski_hog  # type: ignore
+    from skimage.color import rgb2gray as ski_rgb2gray  # type: ignore
+    _SKIMAGE = True
+except ImportError:
+    _SKIMAGE = False
 
-def _hog_features(gray_arr: np.ndarray, cell=8, block=2, bins=9) -> np.ndarray:
-    """Minimal HOG (no external dependencies)."""
-    h, w = gray_arr.shape
-    cx, cy = cell, cell
-    gx = np.zeros_like(gray_arr, dtype=np.float32)
-    gy = np.zeros_like(gray_arr, dtype=np.float32)
-    gx[:, 1:-1] = gray_arr[:, 2:].astype(np.float32) - gray_arr[:, :-2].astype(np.float32)
-    gy[1:-1, :] = gray_arr[2:, :].astype(np.float32) - gray_arr[:-2, :].astype(np.float32)
-    mag = np.sqrt(gx**2 + gy**2)
+# ── Constants ────────────────────────────────────────────────────────────
+IMG_SIZE   = (160, 160)   # larger than before → richer HOG
+SEED       = 42
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Feature extraction
+# ════════════════════════════════════════════════════════════════════════════
+
+def _numpy_hog(gray: np.ndarray, cell: int = 8, block: int = 2,
+               bins: int = 9) -> np.ndarray:
+    """Pure-numpy HOG fallback."""
+    h, w = gray.shape
+    gx = np.zeros_like(gray, dtype=np.float32)
+    gy = np.zeros_like(gray, dtype=np.float32)
+    gx[:, 1:-1] = gray[:, 2:].astype(np.float32) - gray[:, :-2].astype(np.float32)
+    gy[1:-1, :] = gray[2:, :].astype(np.float32) - gray[:-2, :].astype(np.float32)
+    mag = np.sqrt(gx ** 2 + gy ** 2)
     ang = (np.arctan2(gy, gx) * 180 / np.pi) % 180
-
-    cells_y, cells_x = h // cy, w // cx
-    hist = np.zeros((cells_y, cells_x, bins), dtype=np.float32)
-    bin_w = 180.0 / bins
+    cy, cx = h // cell, w // cell
+    hist = np.zeros((cy, cx, bins), dtype=np.float32)
+    bw = 180.0 / bins
     for bi in range(bins):
-        lo, hi = bi * bin_w, (bi + 1) * bin_w
-        mask = (ang >= lo) & (ang < hi)
-        for r in range(cells_y):
-            for c in range(cells_x):
-                patch_mask = mask[r*cy:(r+1)*cy, c*cx:(c+1)*cx]
-                patch_mag  = mag [r*cy:(r+1)*cy, c*cx:(c+1)*cx]
-                hist[r, c, bi] = patch_mag[patch_mask].sum()
-
-    # Block normalise
+        mask = (ang >= bi * bw) & (ang < (bi + 1) * bw)
+        for r in range(cy):
+            for c in range(cx):
+                sl_m = mag[r * cell:(r + 1) * cell, c * cell:(c + 1) * cell]
+                sl_k = mask[r * cell:(r + 1) * cell, c * cell:(c + 1) * cell]
+                hist[r, c, bi] = sl_m[sl_k].sum()
     feats = []
-    for r in range(cells_y - block + 1):
-        for c in range(cells_x - block + 1):
-            block_hist = hist[r:r+block, c:c+block, :].ravel()
-            norm = np.sqrt((block_hist**2).sum() + 1e-6)
-            feats.append(block_hist / norm)
+    for r in range(cy - block + 1):
+        for c in range(cx - block + 1):
+            bh = hist[r:r + block, c:c + block, :].ravel()
+            feats.append(bh / (np.sqrt((bh ** 2).sum()) + 1e-6))
     return np.concatenate(feats)
+
+
+def _hog_features(img_rgb: np.ndarray) -> np.ndarray:
+    if _SKIMAGE:
+        gray = ski_rgb2gray(img_rgb)
+        return ski_hog(
+            gray, orientations=9, pixels_per_cell=(8, 8),
+            cells_per_block=(2, 2), block_norm="L2-Hys",
+            feature_vector=True,
+        ).astype(np.float32)
+    else:
+        gray = (0.299 * img_rgb[:, :, 0] +
+                0.587 * img_rgb[:, :, 1] +
+                0.114 * img_rgb[:, :, 2]).astype(np.uint8)
+        return _numpy_hog(gray)
 
 
 def extract_features(img: Image.Image) -> np.ndarray:
     """
-    Concatenate:
-      • HOG on grayscale
-      • RGB colour histogram (32 bins × 3 channels)
-      • LAB colour histogram (16 bins × 3 channels)
-      • LBP-like texture (difference sign histogram, 256 bins)
-      • Statistical moments (mean, std, skew, kurt) × 3 RGB channels
+    Returns a 1-D float32 feature vector combining:
+      HOG | RGB hist | LAB hist | stats | DCT | LBP-lite
     """
-    img_resized = img.resize(IMG_SIZE).convert("RGB")
-    arr = np.array(img_resized, dtype=np.uint8)
+    img_r = img.resize(IMG_SIZE).convert("RGB")
+    arr   = np.array(img_r, dtype=np.uint8)
 
-    # 1. HOG on grayscale
-    gray = np.array(img_resized.convert("L"), dtype=np.uint8)
-    hog = _hog_features(gray)
+    # 1. HOG
+    hog_f = _hog_features(arr)
 
-    # 2. RGB histogram
-    rgb_hist = []
+    # 2. RGB colour histograms (64 bins per channel)
+    rgb_h = []
     for ch in range(3):
-        h, _ = np.histogram(arr[:, :, ch], bins=32, range=(0, 256))
-        rgb_hist.append(h / (h.sum() + 1e-6))
-    rgb_hist = np.concatenate(rgb_hist)
+        h, _ = np.histogram(arr[:, :, ch], bins=64, range=(0, 256))
+        rgb_h.append(h / (h.sum() + 1e-6))
+    rgb_h = np.concatenate(rgb_h).astype(np.float32)
 
-    # 3. LAB histogram (approximate via PIL)
-    lab = np.array(img_resized.convert("LAB")) if hasattr(Image, "LAB") else \
-          np.array(img_resized)   # fallback to RGB if LAB not supported
-    lab_hist = []
+    # 3. LAB colour histograms (32 bins per channel)
+    try:
+        lab_arr = np.array(img_r.convert("LAB"), dtype=np.uint8)
+    except Exception:
+        lab_arr = arr
+    lab_h = []
     for ch in range(3):
-        h, _ = np.histogram(lab[:, :, ch], bins=16, range=(0, 256))
-        lab_hist.append(h / (h.sum() + 1e-6))
-    lab_hist = np.concatenate(lab_hist)
+        h, _ = np.histogram(lab_arr[:, :, ch], bins=32, range=(0, 256))
+        lab_h.append(h / (h.sum() + 1e-6))
+    lab_h = np.concatenate(lab_h).astype(np.float32)
 
-    # 4. Statistical moments per channel
+    # 4. Per-channel statistical moments (mean, std, skew, kurt, p5, p95)
     stats = []
     for ch in range(3):
-        ch_data = arr[:, :, ch].astype(np.float32) / 255.0
-        mu  = ch_data.mean()
-        std = ch_data.std()
-        skew = float(np.mean(((ch_data - mu) / (std + 1e-6))**3))
-        kurt = float(np.mean(((ch_data - mu) / (std + 1e-6))**4))
-        stats.extend([mu, std, skew, kurt])
-    stats = np.array(stats, dtype=np.float32)
+        cd  = arr[:, :, ch].astype(np.float64) / 255.0
+        mu  = cd.mean()
+        std = cd.std() + 1e-9
+        stats += [
+            mu, std,
+            float(np.mean(((cd - mu) / std) ** 3)),   # skew
+            float(np.mean(((cd - mu) / std) ** 4)),   # kurt
+            float(np.percentile(cd, 5)),
+            float(np.percentile(cd, 95)),
+        ]
+    stats_f = np.array(stats, dtype=np.float32)
 
-    # 5. Frequency domain – DCT-like (absolute FFT coefficients, top-64)
-    f = np.fft.rfft2(gray.astype(np.float32))
-    fabs = np.abs(f).ravel()
-    fabs_sorted = np.sort(fabs)[::-1][:64]
-    fabs_feat = fabs_sorted / (fabs_sorted.max() + 1e-6)
+    # 5. DCT-frequency fingerprint (top-128 absolute coefficients)
+    gray_f32 = arr.mean(axis=2).astype(np.float32)
+    fft_abs  = np.abs(np.fft.rfft2(gray_f32)).ravel()
+    top128   = np.sort(fft_abs)[::-1][:128]
+    dct_f    = (top128 / (top128.max() + 1e-6)).astype(np.float32)
 
-    return np.concatenate([hog, rgb_hist, lab_hist, stats, fabs_feat]).astype(np.float32)
+    # 6. LBP-lite: sign of difference between pixel and 8-neighbours
+    #    Gives a 256-bin texture histogram
+    pad = np.pad(gray_f32, 1, mode="edge")
+    centre = gray_f32
+    lbp_code = np.zeros_like(centre, dtype=np.uint8)
+    offsets = [(-1,-1),(-1,0),(-1,1),(0,1),(1,1),(1,0),(1,-1),(0,-1)]
+    for bit, (dr, dc) in enumerate(offsets):
+        neighbour = pad[1+dr:1+dr+IMG_SIZE[0], 1+dc:1+dc+IMG_SIZE[1]]
+        lbp_code += ((neighbour >= centre).astype(np.uint8) << bit)
+    lbp_h, _ = np.histogram(lbp_code.ravel(), bins=256, range=(0, 256))
+    lbp_f    = (lbp_h / (lbp_h.sum() + 1e-6)).astype(np.float32)
+
+    return np.concatenate([hog_f, rgb_h, lab_h, stats_f, dct_f, lbp_f])
 
 
-# ── Augmentation ───────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# Augmentation
+# ════════════════════════════════════════════════════════════════════════════
+
 def augment(img: Image.Image, rng: random.Random) -> Image.Image:
-    if rng.random() < 0.5:
-        img = img.transpose(Image.FLIP_LEFT_RIGHT)
-    angle = rng.uniform(-15, 15)
-    img = img.rotate(angle, expand=False, fillcolor=(128, 128, 128))
-    if rng.random() < 0.4:
-        img = ImageEnhance.Brightness(img).enhance(rng.uniform(0.7, 1.3))
-    if rng.random() < 0.4:
-        img = ImageEnhance.Contrast(img).enhance(rng.uniform(0.7, 1.4))
-    if rng.random() < 0.3:
-        img = img.filter(ImageFilter.GaussianBlur(radius=rng.uniform(0.5, 1.5)))
-    if rng.random() < 0.2:
-        img = ImageOps.autocontrast(img)
+    ops = [
+        lambda i: i.transpose(Image.FLIP_LEFT_RIGHT),
+        lambda i: i.transpose(Image.FLIP_TOP_BOTTOM),
+        lambda i: i.rotate(rng.uniform(-20, 20), fillcolor=(128, 128, 128)),
+        lambda i: ImageEnhance.Brightness(i).enhance(rng.uniform(0.6, 1.5)),
+        lambda i: ImageEnhance.Contrast(i).enhance(rng.uniform(0.6, 1.5)),
+        lambda i: ImageEnhance.Sharpness(i).enhance(rng.uniform(0.5, 2.0)),
+        lambda i: ImageEnhance.Color(i).enhance(rng.uniform(0.7, 1.4)),
+        lambda i: i.filter(ImageFilter.GaussianBlur(radius=rng.uniform(0.5, 2.0))),
+        lambda i: ImageOps.autocontrast(i),
+        lambda i: i.crop((
+            rng.randint(0, 16), rng.randint(0, 16),
+            i.width - rng.randint(0, 16), i.height - rng.randint(0, 16)
+        )).resize(i.size),
+    ]
+    # Apply 2–4 random ops
+    for op in rng.sample(ops, k=rng.randint(2, 4)):
+        try:
+            img = op(img)
+        except Exception:
+            pass
     return img
 
 
-# ── Dataset loader ─────────────────────────────────────────────────────────
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+# ════════════════════════════════════════════════════════════════════════════
+# Dataset loading & feature building
+# ════════════════════════════════════════════════════════════════════════════
 
-
-def load_images(data_dir: Path) -> tuple[list, list]:
-    """Returns (paths, labels) for Real(0) and Fake(1)."""
+def load_image_paths(data_dir: Path):
     paths, labels = [], []
     for label, subdir in [(0, "Real"), (1, "Fake")]:
         d = data_dir / subdir
         if not d.exists():
-            print(f"  ⚠  {d} not found – skipping")
+            print(f"  ⚠  Not found: {d}")
             continue
         for f in sorted(d.iterdir()):
             if f.suffix.lower() in IMAGE_EXTS:
@@ -151,124 +202,200 @@ def load_images(data_dir: Path) -> tuple[list, list]:
     return paths, labels
 
 
-def build_dataset(paths, labels, n_aug: int, rng: random.Random, desc: str):
+def build_features(paths, labels, n_aug: int, rng: random.Random,
+                   tag: str) -> tuple:
     X, y = [], []
-    total = len(paths)
-    print(f"  {desc}: extracting features + {n_aug}× augmentation …")
-    for i, (p, label) in enumerate(zip(paths, labels), 1):
-        print(f"\r    [{i}/{total}] {Path(p).name[:40]:40s}", end="", flush=True)
+    t0   = time.time()
+    n    = len(paths)
+    for i, (p, lbl) in enumerate(zip(paths, labels), 1):
+        elapsed = time.time() - t0
+        eta     = (elapsed / i) * (n - i) if i > 1 else 0
+        print(f"\r  {tag} [{i:>4}/{n}]  ETA {eta:>4.0f}s  {Path(p).name[:35]:35s}",
+              end="", flush=True)
         try:
             img = Image.open(p).convert("RGB")
         except Exception as e:
-            print(f"\n    ⚠  Could not open {p}: {e}")
+            print(f"\n  ⚠  Skip {p}: {e}")
             continue
-        # Original
         X.append(extract_features(img))
-        y.append(label)
-        # Augmented copies
+        y.append(lbl)
         for _ in range(n_aug):
-            aug = augment(img, rng)
-            X.append(extract_features(aug))
-            y.append(label)
-    print()
+            X.append(extract_features(augment(img, rng)))
+            y.append(lbl)
+    elapsed = time.time() - t0
+    print(f"\r  {tag} done – {len(X)} samples in {elapsed:.1f}s" + " " * 40)
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.int32)
 
 
-# ── Main ───────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# Main
+# ════════════════════════════════════════════════════════════════════════════
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", default="DATA")
-    parser.add_argument("--out",      default="models/deepfake_sklearn.pkl")
-    parser.add_argument("--n_aug",    type=int, default=8,
-                        help="Augmentation copies per image (more = better generalization)")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data_dir", default="DATA")
+    ap.add_argument("--out",      default="models/deepfake_sklearn.pkl")
+    ap.add_argument("--n_aug",    type=int, default=4,
+                    help="Augmentation copies per training image (default 4)")
+    ap.add_argument("--no_ensemble", action="store_true",
+                    help="Train SVM only (faster, no GBM)")
+    args = ap.parse_args()
 
     root     = Path(__file__).resolve().parent.parent
     data_dir = (root / args.data_dir).resolve()
     out_path = (root / args.out).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n{'='*60}")
-    print("  Verifixia – Sklearn Deepfake Detector Training")
-    print(f"{'='*60}")
-    print(f"  Data dir : {data_dir}")
-    print(f"  Output   : {out_path}")
-    print(f"  Aug×     : {args.n_aug}")
-    print(f"{'='*60}\n")
+    print(f"\n{'='*62}")
+    print("  Verifixia – Deepfake Detector  (re-train with full dataset)")
+    print(f"{'='*62}")
+    print(f"  Data      : {data_dir}")
+    print(f"  Output    : {out_path}")
+    print(f"  Img size  : {IMG_SIZE}")
+    print(f"  Aug×      : {args.n_aug}  |  scikit-image HOG: {_SKIMAGE}")
+    print(f"{'='*62}\n")
 
-    # ── Load paths ──
-    paths, labels = load_images(data_dir)
+    # ── Load & split ──────────────────────────────────────────────────────
+    from sklearn.model_selection import train_test_split
+
+    paths, labels = load_image_paths(data_dir)
     if not paths:
-        print("❌ No images found. Check DATA/Real and DATA/Fake exist.")
+        print("❌  No images found. Check DATA/Real and DATA/Fake.")
         sys.exit(1)
 
     real_n = labels.count(0)
     fake_n = labels.count(1)
-    print(f"  Found {len(paths)} images  (real={real_n}, fake={fake_n})\n")
+    print(f"  Dataset   : {len(paths)} images  (real={real_n}, fake={fake_n})")
 
-    # ── Stratified train/val split ──
-    from sklearn.model_selection import train_test_split
-    train_paths, val_paths, train_labels, val_labels = train_test_split(
-        paths, labels, test_size=0.2, stratify=labels, random_state=42
+    tr_p, va_p, tr_l, va_l = train_test_split(
+        paths, labels, test_size=0.15, stratify=labels, random_state=SEED
     )
-    print(f"  Train: {len(train_paths)}  |  Val: {len(val_paths)}\n")
+    print(f"  Split     : train={len(tr_p)}  val={len(va_p)}\n")
 
-    rng = random.Random(42)
+    rng = random.Random(SEED)
 
-    # ── Build feature arrays ──
-    X_train, y_train = build_dataset(train_paths, train_labels, args.n_aug, rng, "Train")
-    X_val,   y_val   = build_dataset(val_paths,   val_labels,   0,          rng, "Val  ")
+    # ── Feature extraction ────────────────────────────────────────────────
+    X_tr, y_tr = build_features(tr_p, tr_l, args.n_aug, rng, "Train")
+    X_va, y_va = build_features(va_p, va_l, 0,          rng, "Val  ")
 
-    print(f"\n  Feature shape: {X_train.shape}  ({X_train.shape[1]} features per image)")
+    print(f"\n  Features  : {X_tr.shape[1]} dims per image")
+    print(f"  Train set : {X_tr.shape[0]} samples  "
+          f"(real={int((y_tr==0).sum())}, fake={int((y_tr==1).sum())})")
 
-    # ── Normalise ──
+    # ── Normalise ─────────────────────────────────────────────────────────
     from sklearn.preprocessing import StandardScaler
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_val   = scaler.transform(X_val)
+    scaler  = StandardScaler()
+    X_tr_sc = scaler.fit_transform(X_tr)
+    X_va_sc = scaler.transform(X_va)
 
-    # ── Train SVM + calibration ──
-    print("\n  Training SVM (this may take ~1-2 min) …")
+    # ── Models ────────────────────────────────────────────────────────────
     from sklearn.svm import SVC
+    from sklearn.ensemble import GradientBoostingClassifier, VotingClassifier
     from sklearn.calibration import CalibratedClassifierCV
-    from sklearn.metrics import (classification_report, confusion_matrix,
-                                 roc_auc_score, accuracy_score)
+    from sklearn.metrics import (accuracy_score, classification_report,
+                                  confusion_matrix, roc_auc_score)
 
-    svm = SVC(kernel="rbf", C=10, gamma="scale", class_weight="balanced",
-              probability=False, random_state=42)
-    clf = CalibratedClassifierCV(svm, cv=3, method="isotonic")
-    clf.fit(X_train, y_train)
+    print("\n  Training SVM …")
+    t0  = time.time()
+    svm = SVC(kernel="rbf", C=20, gamma="scale",
+              class_weight="balanced", probability=False, random_state=SEED)
+    svm_cal = CalibratedClassifierCV(svm, cv=5, method="isotonic")
+    svm_cal.fit(X_tr_sc, y_tr)
+    print(f"  SVM done  ({time.time()-t0:.1f}s)")
 
-    # ── Evaluate ──
-    print("\n  Evaluating …")
-    preds  = clf.predict(X_val)
-    probs  = clf.predict_proba(X_val)[:, 1]
-    acc    = accuracy_score(y_val, preds)
+    if not args.no_ensemble:
+        print("\n  Training Gradient Boosting …")
+        t0  = time.time()
+        gbm = GradientBoostingClassifier(
+            n_estimators=300, learning_rate=0.05, max_depth=4,
+            subsample=0.8, min_samples_leaf=5, random_state=SEED,
+        )
+        gbm.fit(X_tr_sc, y_tr)
+        print(f"  GBM done  ({time.time()-t0:.1f}s)")
 
-    print(f"\n{'='*60}")
-    print(f"  Validation Accuracy : {acc*100:.2f}%")
-    print(f"{'='*60}")
+        # Soft-voting ensemble  (SVM prob + GBM prob averaged)
+        print("\n  Building ensemble …")
+        ensemble_probs = (
+            svm_cal.predict_proba(X_va_sc)[:, 1] * 0.5 +
+            gbm.predict_proba(X_va_sc)[:, 1]     * 0.5
+        )
+        ens_preds = (ensemble_probs > 0.5).astype(int)
+        ens_acc   = accuracy_score(y_va, ens_preds)
+        svm_acc   = accuracy_score(y_va, svm_cal.predict(X_va_sc))
+        gbm_acc   = accuracy_score(y_va, gbm.predict(X_va_sc))
+
+        print(f"\n  Accuracy  → SVM: {svm_acc*100:.2f}%  "
+              f"GBM: {gbm_acc*100:.2f}%  Ensemble: {ens_acc*100:.2f}%")
+
+        # Pick best classifier for saving
+        if ens_acc >= max(svm_acc, gbm_acc):
+            final_probs  = ensemble_probs
+            final_preds  = ens_preds
+            model_label  = "Ensemble (SVM+GBM)"
+            saved_bundle = {
+                "type":       "ensemble",
+                "svm":        svm_cal,
+                "gbm":        gbm,
+                "scaler":     scaler,
+                "img_size":   IMG_SIZE,
+            }
+        elif svm_acc >= gbm_acc:
+            final_probs  = svm_cal.predict_proba(X_va_sc)[:, 1]
+            final_preds  = svm_cal.predict(X_va_sc)
+            model_label  = "SVM"
+            saved_bundle = {
+                "type":       "svm",
+                "classifier": svm_cal,
+                "scaler":     scaler,
+                "img_size":   IMG_SIZE,
+            }
+        else:
+            final_probs  = gbm.predict_proba(X_va_sc)[:, 1]
+            final_preds  = gbm.predict(X_va_sc)
+            model_label  = "GradientBoosting"
+            saved_bundle = {
+                "type":       "gbm",
+                "classifier": gbm,
+                "scaler":     scaler,
+                "img_size":   IMG_SIZE,
+            }
+    else:
+        final_probs  = svm_cal.predict_proba(X_va_sc)[:, 1]
+        final_preds  = svm_cal.predict(X_va_sc)
+        model_label  = "SVM"
+        saved_bundle = {
+            "type":       "svm",
+            "classifier": svm_cal,
+            "scaler":     scaler,
+            "img_size":   IMG_SIZE,
+        }
+
+    # ── Final evaluation ──────────────────────────────────────────────────
+    acc = accuracy_score(y_va, final_preds)
+    print(f"\n{'='*62}")
+    print(f"  Best model  : {model_label}")
+    print(f"  Val accuracy: {acc*100:.2f}%")
+    print(f"{'='*62}")
     print("\n  Classification Report:")
-    print(classification_report(y_val, preds, target_names=["Real", "Fake"], digits=4))
+    print(classification_report(y_va, final_preds,
+                                target_names=["Real", "Fake"], digits=4))
 
-    cm = confusion_matrix(y_val, preds)
-    print("  Confusion Matrix (rows=actual, cols=predicted):")
+    cm = confusion_matrix(y_va, final_preds)
+    print("  Confusion Matrix  (rows=actual, cols=predicted):")
     print(f"             Real   Fake")
     print(f"    Real   {cm[0][0]:>5}  {cm[0][1]:>5}")
     print(f"    Fake   {cm[1][0]:>5}  {cm[1][1]:>5}")
+    if len(set(y_va)) > 1:
+        auc = roc_auc_score(y_va, final_probs)
+        print(f"\n  ROC-AUC     : {auc:.4f}")
 
-    if len(set(y_val)) > 1:
-        auc = roc_auc_score(y_val, probs)
-        print(f"\n  ROC-AUC : {auc:.4f}")
-
-    # ── Save ──
-    import pickle
-    bundle = {"scaler": scaler, "classifier": clf, "img_size": IMG_SIZE}
+    # ── Save ──────────────────────────────────────────────────────────────
     with open(out_path, "wb") as f:
-        pickle.dump(bundle, f)
+        pickle.dump(saved_bundle, f)
 
-    print(f"\n✅  Model saved → {out_path}")
-    print("   The backend will load it automatically at startup.\n")
+    size_mb = out_path.stat().st_size / 1_048_576
+    print(f"\n✅  Saved {model_label} → {out_path}  ({size_mb:.1f} MB)")
+    print("   Backend will load it automatically on next start.\n")
 
 
 if __name__ == "__main__":
