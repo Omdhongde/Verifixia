@@ -1,5 +1,5 @@
 import { Video, AlertTriangle } from "lucide-react";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 
 interface VideoFeedProps {
@@ -19,10 +19,10 @@ export const VideoFeed = ({ isMonitoring, threatLevel, mediaSrc, mediaType }: Vi
     return host === "localhost" || host === "127.0.0.1" || host === "::1";
   };
 
-  const isCameraContextSecure = () => {
+  const isCameraContextSecure = useCallback(() => {
     if (typeof window === "undefined") return false;
     return window.isSecureContext || isLocalhost();
-  };
+  }, []);
 
   const getLocalhostRedirectUrl = () => {
     if (typeof window === "undefined") return null;
@@ -158,7 +158,7 @@ export const VideoFeed = ({ isMonitoring, threatLevel, mediaSrc, mediaType }: Vi
         videoEl.srcObject = null;
       }
     };
-  }, [isMonitoring, mediaSrc]);
+  }, [isMonitoring, mediaSrc, isCameraContextSecure]);
 
   return (
     <div className={`glass-card relative overflow-hidden aspect-video ${getThreatColor()} border-2 transition-all duration-500`}>

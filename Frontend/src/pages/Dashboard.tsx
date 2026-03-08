@@ -41,9 +41,9 @@ export const Dashboard = () => {
   const [lastIsVideo, setLastIsVideo] = useState<boolean | undefined>(undefined);
   const [lastThreatLevel, setLastThreatLevel] = useState<string | undefined>(undefined);
   const [lastModelUsed, setLastModelUsed] = useState<string | undefined>(undefined);
-  const [lastAnalysis, setLastAnalysis] = useState<any>(undefined);
-  const [lastModelInfo, setLastModelInfo] = useState<any>(undefined);
-  const [lastProcessingTime, setLastProcessingTime] = useState<any>(undefined);
+  const [lastAnalysis, setLastAnalysis] = useState<Record<string, string> | undefined>(undefined);
+  const [lastModelInfo, setLastModelInfo] = useState<Record<string, string> | undefined>(undefined);
+  const [lastProcessingTime, setLastProcessingTime] = useState<Record<string, number> | undefined>(undefined);
   const [mediaSrc, setMediaSrc] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<"image" | "video" | null>(null);
   const [currentObjectUrl, setCurrentObjectUrl] = useState<string | null>(null);
@@ -96,7 +96,7 @@ export const Dashboard = () => {
       const mappedLogs: LogEntry[] = serverLogs
         .slice()
         .reverse()
-        .map((log: any) => {
+        .map((log: { timestamp?: string; filename?: string; prediction?: string }) => {
           const parsedTs = new Date(log.timestamp);
           const timestamp = Number.isNaN(parsedTs.getTime())
             ? String(log.timestamp ?? "")

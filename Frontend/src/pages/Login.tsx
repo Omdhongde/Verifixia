@@ -28,8 +28,8 @@ export const Login = () => {
         toast.success("Signed in successfully");
       }
       navigate("/");
-    } catch (err: any) {
-      const message = err?.message || "Authentication failed";
+    } catch (err: unknown) {
+      const message = (err as { message?: string })?.message || "Authentication failed";
       toast.error(message);
     } finally {
       setIsLoading(false);
