@@ -1,63 +1,53 @@
-# Python
+# ── Secrets & environment variables ──────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+Backend/.env
+Frontend/.env
+serviceAccountKey.json
+**/serviceAccountKey*.json
+firebase-adminsdk*.json
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.egg
+*.pyc
+.Python
+venv/
+.venv/
+env/
+ENV/
 *.egg-info/
 dist/
 build/
-.eggs/
-*.whl
-.Python
-env/
-venv/
-.venv/
-ENV/
-.env
-*.env
+.pytest_cache/
+.mypy_cache/
 
-# Node
+# ── Node / Frontend ───────────────────────────────────────────────────────────
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Build outputs
+Frontend/node_modules/
 Frontend/dist/
 Frontend/.vite/
+dist/
+*.tsbuildinfo
 
-# Environment files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Logs
-*.log
-detection_logs.jsonl
-
-# Uploads (user data, not source code)
+# ── Uploads & user data ───────────────────────────────────────────────────────
 uploads/
 Backend/uploads/
+*.jsonl
+detection_logs.jsonl
+Backend/detection_logs.jsonl
 
-# OS
+# ── Models (large binary files) ───────────────────────────────────────────────
+# models/*.pth
+# models/*.pkl
+# Uncomment above if you don't want to track model weights in git
+
+# ── OS & editor ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-
-# IDE
-.vscode/
-.idea/
+.vscode/settings.json
 *.swp
 *.swo
-
-# ML models (large binary files - use Git LFS or external storage)
-# models/*.pkl
-# models/*.pth
-
-# Firebase service account keys (SENSITIVE - never commit)
-*serviceAccount*.json
-*service_account*.json
-firebase-adminsdk*.json
