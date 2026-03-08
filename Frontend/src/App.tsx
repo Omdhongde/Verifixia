@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
@@ -17,20 +17,35 @@ import { watchAuthState, firebaseEnabled } from "@/lib/auth";
 
 const queryClient = new QueryClient();
 
-// ── Shared auth state hook ────────────────────────────────────────────────────
-function useAuth() {
-  const [isReady, setIsReady] = useState(!firebaseEnabled); // instantly ready if Firebase off
-  const [isAuthed, setIsAuthed] = useState(false);
+// ── Auth context – single Firebase listener for the entire app ───────────────
+interface AuthState {
+  isReady: boolean;
+  isAuthed: boolean;
+}
+
+const AuthContext = createContext<AuthState>({
+  isReady: !firebaseEnabled,
+  isAuthed: false,
+});
+
+function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<AuthState>({
+    isReady: !firebaseEnabled, // instantly ready if Firebase is off
+    isAuthed: false,
+  });
 
   useEffect(() => {
     const unsub = watchAuthState((user) => {
-      setIsAuthed(!!user);
-      setIsReady(true);
+      setState({ isReady: true, isAuthed: !!user });
     });
     return () => unsub();
   }, []);
 
-  return { isReady, isAuthed };
+  return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>;
+}
+
+function useAuth() {
+  return useContext(AuthContext);
 }
 
 // ── Loading spinner shown while Firebase resolves auth state ─────────────────
@@ -66,22 +81,24 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          {/* Public – only accessible when NOT logged in */}
-          <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+        <AuthProvider>
+          <Routes>
+            {/* Public – only accessible when NOT logged in */}
+            <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
 
-          {/* Protected – redirect to /login when not logged in */}
-          <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/forensic-logs" element={<ForensicLogs />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/support" element={<Support />} />
-            <Route path="/profile" element={<Profile />} />
-          </Route>
+            {/* Protected – redirect to /login when not logged in */}
+            <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/forensic-logs" element={<ForensicLogs />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/support" element={<Support />} />
+              <Route path="/profile" element={<Profile />} />
+            </Route>
 
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

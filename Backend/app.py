@@ -197,7 +197,9 @@ def predict_deepfake_sklearn(image_path: str) -> dict:
 
     lab_hist = []
     try:
-        lab_arr = np.array(img_r.convert("LAB"))
+        # PIL does not support "LAB" mode natively; use YCbCr as a perceptual
+        # colour-space proxy that IS supported and captures similar signal.
+        lab_arr = np.array(img_r.convert("YCbCr"))
     except Exception:
         lab_arr = arr
     for ch in range(3):
@@ -341,8 +343,7 @@ def _is_cartoon_or_synthetic_art(image_path: str) -> bool:
     try:
         img = Image.open(image_path).convert("RGB")
         small = img.resize((64, 64))
-        pixels = list(small.get_flattened_data() if hasattr(small, "get_flattened_data")
-                      else small.getdata())  # list of (R,G,B)
+        pixels = list(small.getdata())  # list of (R,G,B)
 
         # Signal 1 – highly saturated pixels (vivid anime colours)
         saturated = 0
@@ -458,64 +459,16 @@ def predict_deepfake(image_path):
             logger.warning("Falling back to heuristic prediction")
 
     # Tier 3: Heuristic-based prediction
+    # Note: cartoon/anime pre-check already ran at the top of predict_deepfake(),
+    # so by the time we reach here the image is expected to be photographic.
     try:
         img_rgb = Image.open(image_path).convert("RGB")
         img_gray = img_rgb.convert("L")
         stat = ImageStat.Stat(img_gray)
-        stat_rgb = ImageStat.Stat(img_rgb)
 
         mean = stat.mean[0]
         stddev = stat.stddev[0]
 
-        # ── Cartoon / anime detection ──────────────────────────────────
-        # Cartoon images have very few unique colours and extremely flat
-        # regions (low stddev within colour bands).  If detected, return
-        # a clear "not a real photo" result rather than silently saying Real.
-        try:
-            import numpy as _np  # noqa: F401 – numpy available via scikit-learn dep
-            _has_np = True
-        except ImportError:
-            _has_np = False
-
-        is_cartoon = False
-        unique_colors = 9999
-        avg_channel_std = 99.0
-
-        # Count unique colours in a 64×64 thumbnail (fast & reliable)
-        small = img_rgb.resize((64, 64))
-        pixels = list(small.getdata())  # list of (R,G,B) tuples
-        unique_colors = len(set(pixels))
-        # Real photos have very high colour diversity; cartoons/anime are low
-        if unique_colors < 800:  # out of 4096 pixels
-            is_cartoon = True
-
-        # Channel stddev: cartoons have very low per-channel variation
-        channel_stddevs = stat_rgb.stddev  # list of 3 values
-        avg_channel_std = sum(channel_stddevs) / 3
-        if avg_channel_std < 25:
-            is_cartoon = True
-
-        if is_cartoon:
-            logger.info("Heuristic: cartoon/anime detected (unique_colors=%d, avg_std=%.1f)", unique_colors, avg_channel_std)
-            return {
-                "prediction": "Fake",
-                "confidence": 88.0,
-                "confidence_raw": 0.88,
-                "threat_level": "high",
-                "model_used": "Heuristic Fallback",
-                "processing_time": {"preprocessing_ms": 0, "inference_ms": 0, "total_ms": 0},
-                "analysis": {
-                    "level": "Heuristic",
-                    "description": "Image appears to be AI-generated, illustrated or animated (cartoon/anime characteristics detected)",
-                    "recommendation": "Content is not a real photograph – likely synthetic or illustrated",
-                },
-                "model_info": {
-                    "architecture": "Statistical Analysis",
-                    "input_size": "N/A",
-                    "framework": "PIL",
-                    "device": "cpu",
-                },
-            }
         # ── Photo heuristic ────────────────────────────────────────────
         norm_contrast = max(0.0, min(1.0, stddev / 64.0))
         norm_brightness = max(0.0, min(1.0, abs(mean - 128) / 128.0))
@@ -793,24 +746,28 @@ def upload_image():
             prediction, confidence = predict_deepfake_video(filepath)
             result = {
                 "prediction": prediction,
-                "confidence": confidence * 100,
+                "confidence": round(confidence * 100, 2),
                 "confidence_raw": confidence,
                 "threat_level": "high" if confidence > 0.7 else "medium" if confidence > 0.4 else "low",
-                "model_used": "Video Analysis (Mock)",
+                "model_used": "Verifixia AI Video Analyser",
                 "processing_time": {
                     "preprocessing_ms": 0,
                     "inference_ms": 0,
                     "total_ms": 0
                 },
                 "analysis": {
-                    "level": "Video",
-                    "description": "Video analysis requires specialized processing",
-                    "recommendation": "Full video analysis coming soon"
+                    "level": "Video (frame sampling)",
+                    "description": "Up to 5 evenly-spaced frames extracted and analysed",
+                    "recommendation": (
+                        "Video flagged for review" if prediction == "Fake"
+                        else "Video appears authentic" if prediction == "Real"
+                        else "Insufficient frames to determine authenticity"
+                    ),
                 },
                 "model_info": {
-                    "architecture": "Video Analyzer",
+                    "architecture": "Frame-sampled image pipeline",
                     "input_size": "Variable",
-                    "framework": "Mock",
+                    "framework": "PIL + image model",
                     "device": "cpu"
                 }
             }
