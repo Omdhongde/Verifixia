@@ -1,2 +1,0 @@
-{"timestamp": "2026-02-13T22:33:07.274050", "filename": "f52c038b-4eb7-47a0-89b7-2e7c8410891f_dummy.jpg", "prediction": "Fake", "confidence": 99.27398562431335, "threat_level": "high", "model_used": "DeepGuard Xception v2.4.1", "processing_time_ms": 51.98}
-{"timestamp": "2026-02-13T22:38:12.407597", "filename": "381e68a2-d6c5-4346-a161-ea45dd5e190d_smoke.jpg", "prediction": "Fake", "confidence": 65.09732604026794, "threat_level": "medium", "model_used": "DeepGuard Xception v2.4.1", "processing_time_ms": 70.1}

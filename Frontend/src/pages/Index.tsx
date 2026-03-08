@@ -60,57 +60,32 @@ const Index = () => {
     setLogs((prev) => [newEntry, ...prev].slice(0, 50));
   }, []);
 
-  // Simulate monitoring activity
+  // Simulate monitoring activity (metrics only – NOT fake predictions)
   useEffect(() => {
     if (!isMonitoring) {
       setThreatLevel("safe");
       return;
     }
 
-    // Random confidence score fluctuation
-    const scoreInterval = setInterval(() => {
-      const baseScore = Math.random() * 100;
-      const adjustedScore = Math.min(100, baseScore * (sensitivity / 50));
-      setConfidenceScore(Math.round(adjustedScore));
-
-      // Keep lastPrediction in sync with simulated monitoring
-      if (adjustedScore >= 70) {
-        setLastPrediction("Fake");
-        setLastConfidence(adjustedScore);
-      } else if (adjustedScore <= 30) {
-        setLastPrediction("Real");
-        setLastConfidence(100 - adjustedScore);
-      }
-
-      // Update threat level based on score
-      if (adjustedScore >= 70) {
-        setThreatLevel("danger");
-      } else if (adjustedScore >= 40) {
-        setThreatLevel("warning");
-      } else {
-        setThreatLevel("safe");
-      }
-    }, 2000);
-
-    // Random log entries
-    const logInterval = setInterval(() => {
-      const randomLog = MOCK_LOG_MESSAGES[Math.floor(Math.random() * MOCK_LOG_MESSAGES.length)];
-      addLogEntry(randomLog);
-    }, 3000);
-
-    // Random metric updates
+    // Only update metrics (latency, fps, faces) – do NOT fake prediction scores
+    // Confidence / prediction are only set by real backend responses (handleUploadMedia)
     const metricInterval = setInterval(() => {
       setLatency(35 + Math.floor(Math.random() * 30));
       setFps(28 + Math.floor(Math.random() * 5));
       setFacesScanned((prev) => prev + Math.floor(Math.random() * 3));
     }, 1500);
 
+    // Random log entries to show the system is active
+    const logInterval = setInterval(() => {
+      const randomLog = MOCK_LOG_MESSAGES[Math.floor(Math.random() * MOCK_LOG_MESSAGES.length)];
+      addLogEntry(randomLog);
+    }, 3000);
+
     return () => {
-      clearInterval(scoreInterval);
-      clearInterval(logInterval);
       clearInterval(metricInterval);
+      clearInterval(logInterval);
     };
-  }, [isMonitoring, sensitivity, addLogEntry]);
+  }, [isMonitoring, addLogEntry]);
 
   // Trigger alert toast when deepfake detected
   useEffect(() => {
@@ -126,13 +101,23 @@ const Index = () => {
   const handleStartStop = () => {
     setIsMonitoring(!isMonitoring);
     if (!isMonitoring) {
-      addLogEntry({ message: "Monitoring session started", type: "info" });
+      // Reset previous upload results when starting a new monitoring session
+      setLastPrediction("Unknown");
+      setLastConfidence(null);
+      setLastFilename(undefined);
+      setLastIsVideo(undefined);
+      setConfidenceScore(0);
+      setThreatLevel("safe");
+      setMediaSrc(null);
+      setMediaType(null);
+      addLogEntry({ message: "Monitoring session started – upload a file to analyse", type: "info" });
       toast.success("Monitoring Started", {
-        description: "DeepShield AI is now analyzing the video feed.",
+        description: "Upload an image or video file to run deepfake analysis.",
       });
     } else {
       addLogEntry({ message: "Monitoring session ended", type: "info" });
       setConfidenceScore(0);
+      setThreatLevel("safe");
       toast.info("Monitoring Stopped", {
         description: "Video analysis has been paused.",
       });
@@ -166,6 +151,15 @@ const Index = () => {
       setLastPrediction(prediction as "Real" | "Fake" | "Unknown");
       setLastFilename(result?.filename ?? file.name);
       setLastIsVideo(result?.isVideo === true);
+
+      // Update threat level based on REAL backend prediction
+      if (prediction === "Fake") {
+        setThreatLevel("danger");
+      } else if (prediction === "Real") {
+        setThreatLevel("safe");
+      } else {
+        setThreatLevel("warning");
+      }
 
       // If backend provided a public file URL, show it in the player
       if (result?.file_url) {
