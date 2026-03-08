@@ -41,8 +41,8 @@ detection_logs.jsonl
 Backend/detection_logs.jsonl
 
 # ── Models (large binary files) ───────────────────────────────────────────────
-# models/*.pth
-# models/*.pkl
+models/*.pkl
+# models/*.pth  # Uncomment to also exclude PyTorch weights
 # Uncomment above if you don't want to track model weights in git
 
 # ── OS & editor ───────────────────────────────────────────────────────────────
