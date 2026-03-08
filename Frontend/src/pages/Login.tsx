@@ -64,8 +64,9 @@ export const Login = () => {
           </div>
 
           {!firebaseEnabled && (
-            <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
-              Firebase is not configured. Add `VITE_FIREBASE_*` variables in `Frontend/.env`.
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive space-y-1">
+              <p className="font-semibold">⚠️ Firebase not configured</p>
+              <p>Authentication is unavailable. The site administrator needs to add the <code className="bg-destructive/20 px-1 rounded">VITE_FIREBASE_*</code> environment variables in the hosting dashboard (Netlify → Site configuration → Environment variables).</p>
             </div>
           )}
 
