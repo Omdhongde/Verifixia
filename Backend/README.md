@@ -50,8 +50,12 @@ Health check endpoint.
 ```json
 {
   "status": "healthy",
+  "pytorch_available": true,
+  "sklearn_available": false,
+  "active_model": "pytorch",
   "model_loaded": true,
-  "device": "cuda"
+  "device": "cpu",
+  "model_info": { /* ... */ }
 }
 ```
 
@@ -60,20 +64,29 @@ Health check endpoint.
 1. **Install Dependencies:**
 ```bash
 pip install -r requirements.txt
+# install a CPU build of torch so the server can load weights
+pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 ```
 
-2. **Train Model (Optional):**
-```bash
-cd pytorch
-python train_improved.py
-```
+2. **Obtain a pretrained model** (you do not have to train locally):
+   - copy `models/xception_deepfake.pth` and/or
+     `models/deepfake_sklearn.pkl` into the repository (Git LFS is
+     recommended for large binaries), **or**
+   - run the helper script from the repo root:
+     ```bash
+     python ../scripts/download_pretrained_models.py \
+         --pytorch-url <URL> --sklearn-url <URL>
+     ```
+   - you may also set the `MODEL_URL` / `SKLEARN_URL` environment
+     variables and the backend will fetch missing weights on startup.
 
 3. **Run the API:**
 ```bash
 python app.py
 ```
 
-The API will be available at `http://localhost:5000`
+The API will be available at `http://localhost:3001` (or whatever port
+is set by `PORT`/`FLASK_RUN_PORT`).
 
 ## Project Structure
 

@@ -67,6 +67,39 @@ Verifixia/
 ---
 
 ## 🚀 Quick Start
+> **Automation**: we provide a `Makefile` in the repo root plus a
+> convenient `Backend/run_backend.sh` helper.  The Makefile wraps the usual
+> tasks (environment setup, training, downloading models, starting the server)
+> so you don't need to remember exact commands.  Example:
+>
+> ```sh
+> # create or update virtualenv & install deps
+> make env
+>
+> # start backend (uses venv automatically)
+> make backend
+>
+> # train an sklearn detector
+> make train-sklearn
+>
+> # download weights (pass --pytorch-url/--sklearn-url args)
+> make download-models -- --pytorch-url=https://.../xception_deepfake.pth
+> ```
+>
+> The `run_backend.sh` script already selects `python3.11` if available and
+> sets up the venv for you.
+> **Docker**: a `Backend/Dockerfile` is provided for building a containerized backend
+> that includes the pretrained model(s).  Place your model files in `models/` or set
+> `MODEL_URL` / `SKLEARN_URL` and the image will fetch them on start-up.
+>
+> **Pre-trained weights**: we publish known-good model weights on the project's
+> GitHub releases (look for `xception_deepfake.pth` and
+> `deepfake_sklearn.pkl`).  Download those assets and store them under the
+> `models/` folder before deploying, or set the `MODEL_URL`/`SKLEARN_URL`
+> environment variables to the raw asset URLs so the backend can pull them on
+> first run.  This way you never have to retrain on the deployment host,
+> ensuring portability across platforms.
+
 
 ### Prerequisites
 
@@ -89,8 +122,23 @@ source venv/bin/activate       # Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
+# (optional) install ML dependencies for local training
+# pip install -r requirements-ml.txt
+
 # Configure environment variables
 cp .env.example .env           # then edit .env with your values
+
+# If you are deploying the application, make sure the pretrained model
+# files are available in `../models/`.  You can either commit them to your
+# repository (e.g. using Git LFS) or fetch them during CI using the
+# `scripts/download_pretrained_models.py` helper:
+#
+#     python ../scripts/download_pretrained_models.py \
+#         --pytorch-url <URL> --sklearn-url <URL>
+#
+# Alternatively, set the MODEL_URL and SKLEARN_URL environment variables in
+# your deployment container; `app.py` will automatically download missing
+# weights on startup.
 
 # Start the server (listens on http://localhost:3001)
 python app.py
@@ -123,6 +171,14 @@ python pytorch/train_hf.py
 | `DATABASE_URL` | Neon/PostgreSQL connection string | No |
 | `FIREBASE_CREDENTIALS_PATH` | Path to Firebase service-account JSON | No |
 | `FIREBASE_CREDENTIALS_JSON` | JSON string of service-account credentials | No |
+| `MODEL_URL` | HTTP(S) URL pointing to a pretrained PyTorch `.pth` file; if
+| | the model path is missing the server will try to download it | No |
+| `SKLEARN_URL` | HTTP(S) URL pointing to pretrained scikit-learn `.pkl` file | No |
+
+> **Note:** shipping the pre-trained model as a static file in the repo or
+> embedding it in your container image is the recommended approach for
+> production.  Use the download script/URLs only when you cannot commit the
+> binary weights directly.
 
 ---
 

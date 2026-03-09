@@ -5,18 +5,20 @@ set -e
 cd "$(dirname "$0")" || exit 1
 
 VENV_DIR="venv"
+# choose a modern Python interpreter if available
+PYTHON=${PYTHON:-python3.11}
 
 # Create virtualenv if missing
 if [ ! -d "$VENV_DIR" ]; then
-  echo "Creating virtualenv in $VENV_DIR..."
-  python3 -m venv "$VENV_DIR"
+  echo "Creating virtualenv in $VENV_DIR using $PYTHON..."
+  $PYTHON -m venv "$VENV_DIR"
 fi
 
 # Activate virtualenv
 source "$VENV_DIR/bin/activate"
 
 # Upgrade pip and install requirements (PyTorch commented out in requirements.txt)
-python3 -m pip install --upgrade pip
+$PYTHON -m pip install --upgrade pip
 pip install -r requirements.txt
 
 echo ""

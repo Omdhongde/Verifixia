@@ -52,12 +52,37 @@ except Exception as e:
 # Model configuration
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "xception_deepfake.pth")
 SKLEARN_MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "deepfake_sklearn.pkl")
+# Optional URLs to pre-trained model assets; set these in your deploy environment
+MODEL_URL = os.getenv("MODEL_URL")
+SKLEARN_URL = os.getenv("SKLEARN_URL")
 PYTORCH_AVAILABLE = False
 SKLEARN_AVAILABLE = False
 model = None
 sklearn_model = None
 DEVICE = "cpu"
 model_info = {}
+
+# Helper to download a file from a URL if it's missing
+import shutil
+
+def _download_if_missing(path: str, url: str):
+    if os.path.exists(path):
+        return True
+    if not url:
+        return False
+    try:
+        import requests
+        logger.info(f"Model file not found at {path}, downloading from {url}...")
+        resp = requests.get(url, stream=True, timeout=30)
+        resp.raise_for_status()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            shutil.copyfileobj(resp.raw, f)
+        logger.info(f"Downloaded model to {path}")
+        return True
+    except Exception as ex:
+        logger.warning(f"Failed to download model from {url}: {ex}")
+        return False
 
 # Try to load PyTorch model
 try:
@@ -66,6 +91,10 @@ try:
 
     PYTORCH_AVAILABLE = True
     logger.info("PyTorch is available. Attempting to load model...")
+
+    # attempt automatic download if missing
+    if not os.path.exists(MODEL_PATH) and MODEL_URL:
+        _download_if_missing(MODEL_PATH, MODEL_URL)
 
     model, DEVICE = ModelUtils.load_model(MODEL_PATH)
     model_info = ModelUtils.get_model_info(MODEL_PATH)
@@ -88,6 +117,10 @@ if not PYTORCH_AVAILABLE:
         import numpy as np
         from PIL import ImageStat as _ImageStat  # already imported above
 
+        # download if missing
+        if not os.path.exists(SKLEARN_MODEL_PATH) and SKLEARN_URL:
+            _download_if_missing(SKLEARN_MODEL_PATH, SKLEARN_URL)
+
         if os.path.exists(SKLEARN_MODEL_PATH):
             with open(SKLEARN_MODEL_PATH, "rb") as _f:
                 sklearn_model = pickle.load(_f)
@@ -106,7 +139,7 @@ if not PYTORCH_AVAILABLE:
         else:
             logger.warning(
                 f"No sklearn model found at {SKLEARN_MODEL_PATH}. "
-                "Run: python scripts/train_sklearn.py"
+                "Run: python scripts/train_sklearn.py or set SKLEARN_URL"
             )
     except Exception as e:
         logger.warning(f"Could not load scikit-learn model: {e}")
