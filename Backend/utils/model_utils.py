@@ -20,49 +20,50 @@ except ImportError:
 
 if _TORCH_AVAILABLE:
     class DeepfakeDetector(nn.Module):
-        """Xception-based deepfake detection model"""
-        def __init__(self):
+        """Enhanced Xception-based deepfake detection model"""
+        def __init__(self, pretrained=False):
             super(DeepfakeDetector, self).__init__()
-            self.conv1 = nn.Conv2d(3, 32, 3, 2, 0)
-            self.bn1 = nn.BatchNorm2d(32)
-            self.relu = nn.ReLU(inplace=True)
-
-            # Entry flow
-            self.conv2 = nn.Conv2d(32, 64, 3, 1, 1)
-            self.bn2 = nn.BatchNorm2d(64)
-
-            # Middle flow (simplified)
-            self.conv3 = nn.Conv2d(64, 128, 3, 2, 1)
-            self.bn3 = nn.BatchNorm2d(128)
-
-            self.conv4 = nn.Conv2d(128, 256, 3, 1, 1)
-            self.bn4 = nn.BatchNorm2d(256)
-
-            # Exit flow
-            self.conv5 = nn.Conv2d(256, 512, 3, 2, 1)
-            self.bn5 = nn.BatchNorm2d(512)
-
+            # Create backbone sequential model with enhanced architecture
+            self.backbone = nn.Sequential(
+                nn.Conv2d(3, 32, 3, 2, 0),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                
+                nn.Conv2d(32, 64, 3, 1, 1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                
+                nn.Conv2d(64, 128, 3, 2, 1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                
+                nn.Conv2d(128, 256, 3, 1, 1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                
+                nn.Conv2d(256, 512, 3, 2, 1),
+                nn.BatchNorm2d(512),
+                nn.ReLU(inplace=True)
+            )
+            
+            # Enhanced classification head with extra FC layer
             self.global_pool = nn.AdaptiveAvgPool2d(1)
-            self.dropout = nn.Dropout(0.5)
-            self.fc = nn.Linear(512, 1)
+            self.dropout1 = nn.Dropout(0.5)
+            self.fc1 = nn.Linear(512, 256)
+            self.relu = nn.ReLU(inplace=True)
+            self.dropout2 = nn.Dropout(0.3)
+            self.fc2 = nn.Linear(256, 1)
             self.sigmoid = nn.Sigmoid()
 
         def forward(self, x):
-            # Entry flow
-            x = self.relu(self.bn1(self.conv1(x)))
-            x = self.relu(self.bn2(self.conv2(x)))
-
-            # Middle flow
-            x = self.relu(self.bn3(self.conv3(x)))
-            x = self.relu(self.bn4(self.conv4(x)))
-
-            # Exit flow
-            x = self.relu(self.bn5(self.conv5(x)))
-
+            x = self.backbone(x)
             x = self.global_pool(x)
             x = x.view(x.size(0), -1)
-            x = self.dropout(x)
-            x = self.fc(x)
+            x = self.dropout1(x)
+            x = self.fc1(x)
+            x = self.relu(x)
+            x = self.dropout2(x)
+            x = self.fc2(x)
             return self.sigmoid(x)
 else:
     class DeepfakeDetector:  # type: ignore[no-redef]

@@ -114,6 +114,8 @@ export const VideoFeed = ({ isMonitoring, threatLevel, mediaSrc, mediaType }: Vi
     // Only start camera when monitoring and no external media is provided
     let stream: MediaStream | null = null;
     const videoEl = videoRef.current;
+    let retries = 0;
+    const maxRetries = 2;
 
     const startCamera = async () => {
       if (!isMonitoring) return;
@@ -135,7 +137,16 @@ export const VideoFeed = ({ isMonitoring, threatLevel, mediaSrc, mediaType }: Vi
         }
         setCameraError(null);
       } catch (err) {
-        setCameraError(buildCameraErrorMessage(err));
+        const errorMsg = buildCameraErrorMessage(err);
+        setCameraError(errorMsg);
+        
+        // If camera not found, show demo mode instead of blocking
+        if ((err && typeof err === "object" && ("name" in err)) && 
+            (String((err as { name?: string }).name || "") === "NotFoundError" || 
+             String((err as { name?: string }).name || "") === "DevicesNotFoundError")) {
+          // Set a helpful message for demo mode
+          setCameraError("Camera not detected. Using demo mode - upload files to analyze or try again with a camera connected.");
+        }
       }
     };
 
@@ -195,10 +206,14 @@ export const VideoFeed = ({ isMonitoring, threatLevel, mediaSrc, mediaType }: Vi
         )}
 
         {cameraError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white p-4">
-            <div className="text-center">
-              <div className="font-semibold">Camera Error</div>
-              <div className="text-xs mt-1">{cameraError}</div>
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm text-white p-6">
+            <div className="text-center flex flex-col items-center gap-3">
+              <AlertTriangle className="w-8 h-8 text-yellow-500" />
+              <div>
+                <div className="font-semibold mb-1">Camera Not Available</div>
+                <div className="text-xs text-gray-300 leading-relaxed max-w-xs">{cameraError}</div>
+                <div className="text-xs text-gray-400 mt-3">💡 Tip: You can upload images or videos to test the detector</div>
+              </div>
             </div>
           </div>
         )}

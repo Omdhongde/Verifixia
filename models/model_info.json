@@ -1,0 +1,12 @@
+{
+  "architecture": "DeepfakeDetector (Xception-based)",
+  "total_parameters": 1571073,
+  "input_shape": [
+    3,
+    299,
+    299
+  ],
+  "output": "binary (0=Real, 1=Fake)",
+  "framework": "PyTorch",
+  "device_trained": "cpu"
+}
