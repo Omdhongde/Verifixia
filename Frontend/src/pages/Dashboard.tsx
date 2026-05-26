@@ -44,6 +44,7 @@ export const Dashboard = () => {
   const [lastAnalysis, setLastAnalysis] = useState<Record<string, string> | undefined>(undefined);
   const [lastModelInfo, setLastModelInfo] = useState<Record<string, string> | undefined>(undefined);
   const [lastProcessingTime, setLastProcessingTime] = useState<Record<string, number> | undefined>(undefined);
+  const [lastClassProbs, setLastClassProbs] = useState<{ Real?: number; Deepfake?: number; AIGenerated?: number } | undefined>(undefined);
   const [mediaSrc, setMediaSrc] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<"image" | "video" | null>(null);
   const [currentObjectUrl, setCurrentObjectUrl] = useState<string | null>(null);
@@ -87,6 +88,7 @@ export const Dashboard = () => {
     setLastAnalysis(undefined);
     setLastModelInfo(undefined);
     setLastProcessingTime(undefined);
+    setLastClassProbs(undefined);
   }, [clearCurrentObjectUrl]);
 
   const hydratePersistedLogs = useCallback(async () => {
@@ -289,6 +291,15 @@ export const Dashboard = () => {
       setLastAnalysis(result?.analysis);
       setLastModelInfo(result?.model_info);
       setLastProcessingTime(result?.processing_time);
+      
+      // Extract class probabilities if available
+      if (result?.class_probabilities) {
+        setLastClassProbs({
+          Real: result.class_probabilities.Real,
+          Deepfake: result.class_probabilities.Deepfake,
+          AIGenerated: result.class_probabilities.AIGenerated,
+        });
+      }
 
       if (result?.file_url) {
         clearCurrentObjectUrl();
@@ -397,6 +408,7 @@ export const Dashboard = () => {
             threatLevel={lastThreatLevel}
             modelUsed={lastModelUsed}
             analysis={lastAnalysis}
+            classProbs={lastClassProbs}
           />
           <div className="h-[300px]">
             <DetectionLog logs={logs} />

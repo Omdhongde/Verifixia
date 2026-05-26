@@ -60,6 +60,7 @@ SKLEARN_AVAILABLE = False
 model = None
 sklearn_model = None
 DEVICE = "cpu"
+MODEL_TYPE = "binary"  # "binary" or "multiclass"
 model_info = {}
 
 # Helper to download a file from a URL if it's missing
@@ -96,12 +97,13 @@ try:
     if not os.path.exists(MODEL_PATH) and MODEL_URL:
         _download_if_missing(MODEL_PATH, MODEL_URL)
 
-    model, DEVICE = ModelUtils.load_model(MODEL_PATH)
+    model, DEVICE, MODEL_TYPE = ModelUtils.load_model(MODEL_PATH)
     model_info = ModelUtils.get_model_info(MODEL_PATH)
     model_metadata = ModelUtils.get_model_metadata(model, DEVICE)
     model_info.update(model_metadata)
 
     logger.info(f"Model loaded successfully on device: {DEVICE}")
+    logger.info(f"Model type: {MODEL_TYPE}")
     logger.info(f"Model info: {model_info}")
 
 except Exception as e:
@@ -443,34 +445,59 @@ def predict_deepfake(image_path):
             # Preprocess image
             image_tensor, preprocessing_time = ModelUtils.preprocess_image(image_path)
             
-            # Make prediction
-            prediction_result = ModelUtils.predict_image(model, image_tensor, DEVICE)
+            # Make prediction with model type
+            prediction_result = ModelUtils.predict_image(model, image_tensor, DEVICE, MODEL_TYPE)
             
-            # Get confidence interpretation
-            confidence_interpretation = ModelUtils.interpret_confidence(
-                prediction_result["confidence_raw"]
-            )
-            
-            # Combine all information
-            result = {
-                "prediction": prediction_result["prediction"],
-                "confidence": prediction_result["confidence"],
-                "confidence_raw": prediction_result["confidence_raw"],
-                "threat_level": prediction_result["threat_level"],
-                "model_used": "Verifixia AI Xception v2.4.1",
-                "processing_time": {
-                    "preprocessing_ms": round(preprocessing_time * 1000, 2),
-                    "inference_ms": prediction_result["inference_time_ms"],
-                    "total_ms": round((preprocessing_time * 1000) + prediction_result["inference_time_ms"], 2)
-                },
-                "analysis": confidence_interpretation,
-                "model_info": {
-                    "architecture": "Xception-based CNN",
-                    "input_size": "299x299",
-                    "framework": "PyTorch",
-                    "device": str(DEVICE)
+            # Handle both binary and multiclass results
+            if MODEL_TYPE == "multiclass":
+                result = {
+                    "prediction": prediction_result["prediction"],
+                    "confidence": prediction_result["confidence"],
+                    "class_probabilities": prediction_result.get("class_probabilities", {}),
+                    "model_used": "Verifixia AI Multi-Class Detector v3.0",
+                    "processing_time": {
+                        "preprocessing_ms": round(preprocessing_time * 1000, 2),
+                        "inference_ms": prediction_result["inference_time_ms"],
+                        "total_ms": round((preprocessing_time * 1000) + prediction_result["inference_time_ms"], 2)
+                    },
+                    "analysis": {
+                        "level": "Multi-Class Detection",
+                        "description": f"Detected as {prediction_result['prediction']} with {prediction_result['confidence']:.1f}% confidence",
+                        "recommendation": "Review classification probabilities for all three classes"
+                    },
+                    "model_info": {
+                        "architecture": "ResNet-inspired with SE-Attention",
+                        "classes": ["Real", "Deepfake", "AIGenerated"],
+                        "input_size": "299x299",
+                        "framework": "PyTorch",
+                        "device": str(DEVICE)
+                    }
                 }
-            }
+            else:
+                # Binary model result
+                confidence_interpretation = ModelUtils.interpret_confidence(
+                    prediction_result["confidence_raw"]
+                )
+                
+                result = {
+                    "prediction": prediction_result["prediction"],
+                    "confidence": prediction_result["confidence"],
+                    "confidence_raw": prediction_result["confidence_raw"],
+                    "threat_level": prediction_result["threat_level"],
+                    "model_used": "Verifixia AI Xception v2.4.1",
+                    "processing_time": {
+                        "preprocessing_ms": round(preprocessing_time * 1000, 2),
+                        "inference_ms": prediction_result["inference_time_ms"],
+                        "total_ms": round((preprocessing_time * 1000) + prediction_result["inference_time_ms"], 2)
+                    },
+                    "analysis": confidence_interpretation,
+                    "model_info": {
+                        "architecture": "Xception-based CNN",
+                        "input_size": "299x299",
+                        "framework": "PyTorch",
+                        "device": str(DEVICE)
+                    }
+                }
             
             logger.info(f"Model Prediction: {result['prediction']}, Confidence: {result['confidence']:.2f}%")
             return result

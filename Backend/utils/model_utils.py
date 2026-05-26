@@ -19,52 +19,231 @@ except ImportError:
 
 
 if _TORCH_AVAILABLE:
-    class DeepfakeDetector(nn.Module):
-        """Enhanced Xception-based deepfake detection model"""
-        def __init__(self, pretrained=False):
-            super(DeepfakeDetector, self).__init__()
-            # Create backbone sequential model with enhanced architecture
-            self.backbone = nn.Sequential(
-                nn.Conv2d(3, 32, 3, 2, 0),
-                nn.BatchNorm2d(32),
+    class SqueezeExcitationBlock(nn.Module):
+        """Channel Attention mechanism"""
+        def __init__(self, channels, reduction=16):
+            super().__init__()
+            self.se = nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Conv2d(channels, channels // reduction, 1),
                 nn.ReLU(inplace=True),
-                
-                nn.Conv2d(32, 64, 3, 1, 1),
-                nn.BatchNorm2d(64),
-                nn.ReLU(inplace=True),
-                
-                nn.Conv2d(64, 128, 3, 2, 1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(inplace=True),
-                
-                nn.Conv2d(128, 256, 3, 1, 1),
-                nn.BatchNorm2d(256),
-                nn.ReLU(inplace=True),
-                
-                nn.Conv2d(256, 512, 3, 2, 1),
-                nn.BatchNorm2d(512),
-                nn.ReLU(inplace=True)
+                nn.Conv2d(channels // reduction, channels, 1),
+                nn.Sigmoid()
             )
-            
-            # Enhanced classification head with extra FC layer
-            self.global_pool = nn.AdaptiveAvgPool2d(1)
-            self.dropout1 = nn.Dropout(0.5)
-            self.fc1 = nn.Linear(512, 256)
-            self.relu = nn.ReLU(inplace=True)
-            self.dropout2 = nn.Dropout(0.3)
-            self.fc2 = nn.Linear(256, 1)
-            self.sigmoid = nn.Sigmoid()
-
+        
         def forward(self, x):
-            x = self.backbone(x)
-            x = self.global_pool(x)
+            return x * self.se(x)
+
+    class ResidualBlock(nn.Module):
+        """Residual block with SE attention"""
+        def __init__(self, in_channels, out_channels, stride=1, reduction=16):
+            super().__init__()
+            self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False)
+            self.bn1 = nn.BatchNorm2d(out_channels)
+            self.conv2 = nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1, bias=False)
+            self.bn2 = nn.BatchNorm2d(out_channels)
+            self.se = SqueezeExcitationBlock(out_channels, reduction)
+            self.relu = nn.ReLU(inplace=True)
+            
+            self.shortcut = nn.Sequential()
+            if stride != 1 or in_channels != out_channels:
+                self.shortcut = nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels, 1, stride=stride, bias=False),
+                    nn.BatchNorm2d(out_channels)
+                )
+        
+        def forward(self, x):
+            residual = self.shortcut(x)
+            out = self.relu(self.bn1(self.conv1(x)))
+            out = self.bn2(self.conv2(out))
+            out = self.se(out)
+            out += residual
+            out = self.relu(out)
+            return out
+
+    class DeepfakeDetector(nn.Module):
+        """Improved Deepfake Detection Model with Residual Blocks & SE Attention"""
+        def __init__(self, pretrained=False):
+            super().__init__()
+            
+            # Initial convolution layer
+            self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+            self.bn1 = nn.BatchNorm2d(64)
+            self.relu = nn.ReLU(inplace=True)
+            self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            
+            # Residual layers with increasing channels
+            self.layer1 = self._make_layer(64, 64, 2, stride=1)
+            self.layer2 = self._make_layer(64, 128, 2, stride=2)
+            self.layer3 = self._make_layer(128, 256, 2, stride=2)
+            self.layer4 = self._make_layer(256, 512, 2, stride=2)
+            
+            # Multi-scale feature aggregation
+            self.avg_pool = nn.AdaptiveAvgPool2d(1)
+            self.max_pool = nn.AdaptiveMaxPool2d(1)
+            
+            # Classification head with bottleneck
+            self.fc1 = nn.Linear(512 * 2, 1024)
+            self.bn_fc1 = nn.BatchNorm1d(1024)
+            self.dropout1 = nn.Dropout(0.5)
+            
+            self.fc2 = nn.Linear(1024, 512)
+            self.bn_fc2 = nn.BatchNorm1d(512)
+            self.dropout2 = nn.Dropout(0.4)
+            
+            self.fc3 = nn.Linear(512, 256)
+            self.bn_fc3 = nn.BatchNorm1d(256)
+            self.dropout3 = nn.Dropout(0.3)
+            
+            self.fc_out = nn.Linear(256, 1)
+            self.sigmoid = nn.Sigmoid()
+            
+            # Initialize weights
+            self._init_weights()
+        
+        def _make_layer(self, in_channels, out_channels, blocks, stride=1):
+            layers = []
+            layers.append(ResidualBlock(in_channels, out_channels, stride))
+            for _ in range(1, blocks):
+                layers.append(ResidualBlock(out_channels, out_channels))
+            return nn.Sequential(*layers)
+        
+        def _init_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Conv2d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                elif isinstance(m, nn.BatchNorm2d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.BatchNorm1d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0)
+        
+        def forward(self, x):
+            # Initial layers
+            x = self.relu(self.bn1(self.conv1(x)))
+            x = self.maxpool(x)
+            
+            # Residual blocks
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+            x = self.layer4(x)
+            
+            # Multi-scale pooling (Avg + Max)
+            avg_feat = self.avg_pool(x)
+            max_feat = self.max_pool(x)
+            x = torch.cat([avg_feat, max_feat], dim=1)
             x = x.view(x.size(0), -1)
+            
+            # Classification head
+            x = self.relu(self.bn_fc1(self.fc1(x)))
             x = self.dropout1(x)
-            x = self.fc1(x)
-            x = self.relu(x)
+            
+            x = self.relu(self.bn_fc2(self.fc2(x)))
             x = self.dropout2(x)
-            x = self.fc2(x)
+            
+            x = self.relu(self.bn_fc3(self.fc3(x)))
+            x = self.dropout3(x)
+            
+            x = self.fc_out(x)
             return self.sigmoid(x)
+
+    class MultiClassDetector(nn.Module):
+        """Multi-Class Detector: Real vs Deepfake vs AI-Generated (3-class classification)"""
+        def __init__(self, num_classes=3):
+            super().__init__()
+            
+            # Initial convolution layer
+            self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+            self.bn1 = nn.BatchNorm2d(64)
+            self.relu = nn.ReLU(inplace=True)
+            self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            
+            # Residual layers with increasing channels
+            self.layer1 = self._make_layer(64, 64, 2, stride=1)
+            self.layer2 = self._make_layer(64, 128, 2, stride=2)
+            self.layer3 = self._make_layer(128, 256, 2, stride=2)
+            self.layer4 = self._make_layer(256, 512, 2, stride=2)
+            
+            # Multi-scale feature aggregation
+            self.avg_pool = nn.AdaptiveAvgPool2d(1)
+            self.max_pool = nn.AdaptiveMaxPool2d(1)
+            
+            # Classification head with bottleneck
+            self.fc1 = nn.Linear(512 * 2, 1024)
+            self.bn_fc1 = nn.BatchNorm1d(1024)
+            self.dropout1 = nn.Dropout(0.5)
+            
+            self.fc2 = nn.Linear(1024, 512)
+            self.bn_fc2 = nn.BatchNorm1d(512)
+            self.dropout2 = nn.Dropout(0.4)
+            
+            self.fc3 = nn.Linear(512, 256)
+            self.bn_fc3 = nn.BatchNorm1d(256)
+            self.dropout3 = nn.Dropout(0.3)
+            
+            # Multi-class output
+            self.fc_out = nn.Linear(256, num_classes)
+            
+            # Initialize weights
+            self._init_weights()
+        
+        def _make_layer(self, in_channels, out_channels, blocks, stride=1):
+            layers = []
+            layers.append(ResidualBlock(in_channels, out_channels, stride))
+            for _ in range(1, blocks):
+                layers.append(ResidualBlock(out_channels, out_channels))
+            return nn.Sequential(*layers)
+        
+        def _init_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Conv2d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                elif isinstance(m, nn.BatchNorm2d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.BatchNorm1d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0)
+        
+        def forward(self, x):
+            # Initial layers
+            x = self.relu(self.bn1(self.conv1(x)))
+            x = self.maxpool(x)
+            
+            # Residual blocks
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+            x = self.layer4(x)
+            
+            # Multi-scale pooling (Avg + Max)
+            avg_feat = self.avg_pool(x)
+            max_feat = self.max_pool(x)
+            x = torch.cat([avg_feat, max_feat], dim=1)
+            x = x.view(x.size(0), -1)
+            
+            # Classification head
+            x = self.relu(self.bn_fc1(self.fc1(x)))
+            x = self.dropout1(x)
+            
+            x = self.relu(self.bn_fc2(self.fc2(x)))
+            x = self.dropout2(x)
+            
+            x = self.relu(self.bn_fc3(self.fc3(x)))
+            x = self.dropout3(x)
+            
+            x = self.fc_out(x)
+            return x
 else:
     class DeepfakeDetector:  # type: ignore[no-redef]
         """Stub when PyTorch is unavailable"""
@@ -75,24 +254,46 @@ class ModelUtils:
     """Utility class for model operations"""
 
     @staticmethod
-    def load_model(model_path: str, device: Optional[Any] = None) -> Tuple[Any, Any]:
-        """Load a trained model with error handling"""
+    def load_model(model_path: str = None, device: Optional[Any] = None) -> Tuple[Any, Any, str]:
+        """Load a trained model with error handling. Supports both binary and multi-class models."""
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        model = DeepfakeDetector()
+        # Try to load multi-class model first, fallback to binary
+        multiclass_path = '../models/multiclass_detector.pth'
+        binary_path = model_path or '../models/xception_deepfake.pth'
         
+        model = None
+        model_type = None
+        
+        # Try multi-class model
+        if os.path.exists(multiclass_path):
+            try:
+                model = MultiClassDetector(num_classes=3)
+                state_dict = torch.load(multiclass_path, map_location=device)
+                model.load_state_dict(state_dict)
+                model.to(device)
+                model.eval()
+                print(f"Multi-class model loaded successfully from {multiclass_path}")
+                model_type = "multiclass"
+                return model, device, model_type
+            except Exception as e:
+                print(f"Warning: Could not load multi-class model: {e}")
+                model = None
+        
+        # Fallback to binary model
         try:
-            state_dict = torch.load(model_path, map_location=device)
+            model = DeepfakeDetector()
+            state_dict = torch.load(binary_path, map_location=device)
             model.load_state_dict(state_dict)
             model.to(device)
             model.eval()
-            print(f"Model loaded successfully from {model_path}")
+            print(f"Binary model loaded successfully from {binary_path}")
+            model_type = "binary"
+            return model, device, model_type
         except Exception as e:
             print(f"Error loading model: {e}")
             raise
-
-        return model, device
 
     @staticmethod
     def preprocess_image(image_path: str, image_size: int = 299) -> Tuple[Any, float]:
@@ -112,42 +313,67 @@ class ModelUtils:
         return tensor, preprocessing_time
 
     @staticmethod
-    def predict_image(model: Any, image_tensor: Any, device: Any) -> Dict[str, Any]:
-        """Make prediction with detailed information"""
+    def predict_image(model: Any, image_tensor: Any, device: Any, model_type: str = "binary") -> Dict[str, Any]:
+        """Make prediction with detailed information. Supports both binary and multi-class models."""
         start_time = time.time()
         
         image_tensor = image_tensor.to(device)
 
         with torch.no_grad():
             output = model(image_tensor)
-            confidence_raw = output.item()
             
         inference_time = time.time() - start_time
         
-        # Determine prediction
-        prediction = "Fake" if confidence_raw > 0.5 else "Real"
-        
-        # Calculate confidence percentage (0-100%)
-        if prediction == "Fake":
-            confidence_percent = confidence_raw * 100
+        if model_type == "multiclass":
+            # Multi-class prediction
+            logits = output
+            probabilities = torch.softmax(logits, dim=1)[0]
+            predicted_class = torch.argmax(probabilities, dim=0).item()
+            confidence = probabilities[predicted_class].item()
+            
+            class_names = ["Real", "Deepfake", "AIGenerated"]
+            prediction = class_names[predicted_class]
+            
+            return {
+                "prediction": prediction,
+                "confidence": confidence * 100,
+                "class_probabilities": {
+                    "Real": float(probabilities[0].item()) * 100,
+                    "Deepfake": float(probabilities[1].item()) * 100,
+                    "AIGenerated": float(probabilities[2].item()) * 100
+                },
+                "inference_time_ms": round(inference_time * 1000, 2),
+                "model_type": "multiclass"
+            }
         else:
-            confidence_percent = (1 - confidence_raw) * 100
-        
-        # Determine threat level
-        if confidence_raw > 0.7:
-            threat_level = "high"
-        elif confidence_raw > 0.4:
-            threat_level = "medium"
-        else:
-            threat_level = "low"
-        
-        return {
-            "prediction": prediction,
-            "confidence": confidence_percent,
-            "confidence_raw": confidence_raw,
-            "threat_level": threat_level,
-            "inference_time_ms": round(inference_time * 1000, 2)
-        }
+            # Binary prediction
+            confidence_raw = output.item()
+            
+            # Determine prediction
+            prediction = "Fake" if confidence_raw > 0.5 else "Real"
+            
+            # Calculate confidence percentage (0-100%)
+            if prediction == "Fake":
+                confidence_percent = confidence_raw * 100
+            else:
+                confidence_percent = (1 - confidence_raw) * 100
+            
+            # Determine threat level
+            if confidence_raw > 0.7:
+                threat_level = "high"
+            elif confidence_raw > 0.4:
+                threat_level = "medium"
+            else:
+                threat_level = "low"
+            
+            return {
+                "prediction": prediction,
+                "confidence": confidence_percent,
+                "confidence_raw": confidence_raw,
+                "threat_level": threat_level,
+                "inference_time_ms": round(inference_time * 1000, 2),
+                "model_type": "binary"
+            }
 
     @staticmethod
     def get_model_info(model_path: str) -> Dict[str, Any]:
