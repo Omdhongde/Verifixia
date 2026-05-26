@@ -1,6 +1,6 @@
 {
   "architecture": "DeepfakeDetector (Xception-based)",
-  "total_parameters": 1571073,
+  "total_parameters": 12975161,
   "input_shape": [
     3,
     299,
