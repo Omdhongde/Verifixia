@@ -259,9 +259,14 @@ class ModelUtils:
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        # Try to load multi-class model first, fallback to binary
-        multiclass_path = '../models/multiclass_detector.pth'
-        binary_path = model_path or '../models/xception_deepfake.pth'
+        # Resolve paths relative to Backend directory
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        multiclass_path = os.path.join(backend_dir, '..', 'models', 'multiclass_detector.pth')
+        binary_path = model_path or os.path.join(backend_dir, '..', 'models', 'xception_deepfake.pth')
+        
+        # Normalize paths
+        multiclass_path = os.path.normpath(multiclass_path)
+        binary_path = os.path.normpath(binary_path)
         
         model = None
         model_type = None

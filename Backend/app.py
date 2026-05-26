@@ -884,6 +884,7 @@ def upload_image():
             "processing_time": result.get("processing_time"),
             "analysis": result.get("analysis"),
             "model_info": result.get("model_info"),
+            "class_probabilities": result.get("class_probabilities"),
             "user_id": user.get("uid") if user else None,
             "session_id": session_id,
             "log_id": saved_log.get("id"),

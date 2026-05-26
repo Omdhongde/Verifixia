@@ -1,0 +1,14 @@
+{
+  "architecture": "Multi-Class Detector (Real/Deepfake/AI-Generated)",
+  "total_parameters": 12975675,
+  "input_shape": [
+    3,
+    299,
+    299
+  ],
+  "output": "3-class (0=Real, 1=Deepfake, 2=AIGenerated)",
+  "framework": "PyTorch",
+  "device_trained": "cpu",
+  "best_accuracy": 0.7565217391304347,
+  "timestamp": "2026-05-26T14:37:37.787300"
+}
