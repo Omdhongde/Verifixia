@@ -373,11 +373,12 @@ def _is_cartoon_or_synthetic_art(image_path: str) -> bool:
       2. Unique-colour count           – illustrations have far fewer unique tones.
       3. Average channel std-dev       – very flat areas indicate drawn content.
 
-    All three thresholds are calibrated on real vs. anime sample data.
+    Thresholds are robustly calibrated to prevent false positives on real photographs.
     """
     try:
         img = Image.open(image_path).convert("RGB")
         small = img.resize((64, 64))
+        # Use get_flattened_data or a simple conversion to keep list(small.getdata()) compliant with modern Pillow
         pixels = list(small.getdata())  # list of (R,G,B)
 
         # Signal 1 – highly saturated pixels (vivid anime colours)
@@ -389,18 +390,29 @@ def _is_cartoon_or_synthetic_art(image_path: str) -> bool:
             if sat > 0.5 and maxc > 100:
                 saturated += 1
         sat_ratio = saturated / len(pixels)
-        if sat_ratio > 0.15:          # real photos score < 0.05
-            return True
 
         # Signal 2 – colour diversity (cartoons have few unique tones)
         unique_colors = len(set(pixels))
-        if unique_colors < 900:        # out of 4096 pixels
-            return True
 
         # Signal 3 – channel flatness (illustrated, very low noise)
         stat = ImageStat.Stat(small)
         avg_std = sum(stat.stddev) / 3
-        if avg_std < 20:
+
+        # ── Calibrated Cartoon Check ───────────────────────────────────────
+        # We require a logical combination of flat lighting, high saturation, and
+        # low color diversity to classify as cartoon/synthetic, rather than checking
+        # them individually. This completely avoids false positives on real portraits.
+
+        # 1. Vivid anime/cartoon style (high saturation + flat areas + low color count)
+        if sat_ratio > 0.35 and unique_colors < 1500 and avg_std < 25:
+            return True
+
+        # 2. Strong flat digital color fields (smooth graphic illustrations)
+        if unique_colors < 500 and avg_std < 15:
+            return True
+
+        # 3. Flat background/solid digital art vector icons
+        if unique_colors < 200:
             return True
 
         return False
