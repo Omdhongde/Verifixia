@@ -382,9 +382,9 @@ def main():
             
     criterion = nn.BCELoss()
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=80)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
     
-    epochs = 80
+    epochs = 100
     start_epoch = 1
     best_val_acc = 0.0
     history = {

@@ -1,9 +1,9 @@
 {
   "model_name": "Verifixia Video-Extracted Deepfake Detector",
-  "epochs_trained": 80,
+  "epochs_trained": 100,
   "dataset": "DeeperForensics local videos",
   "best_accuracy": 0.723404255319149,
-  "timestamp": "2026-05-28T19:46:45.647142",
+  "timestamp": "2026-05-28T20:44:32.298675",
   "framework": "PyTorch",
   "device": "cpu"
 }

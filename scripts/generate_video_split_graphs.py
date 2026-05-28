@@ -27,11 +27,12 @@ def generate_split_graphs():
     total_epochs = len(train_loss)
     print(f"Loaded training history with {total_epochs} total epochs.")
     
-    # Define splits (1-30, 30-50, 50-80) - inclusive of boundaries to show continuity
+    # Define splits (1-30, 30-50, 50-80, 80-100) - inclusive of boundaries to show continuity
     ranges = [
         {"name": "Epochs 1 to 30", "start": 1, "end": 30, "filename": "video_epochs_1_30.png", "color_tr": "#F5A623", "color_val": "#9013FE"},
         {"name": "Epochs 30 to 50", "start": 30, "end": 50, "filename": "video_epochs_30_50.png", "color_tr": "#4A90E2", "color_val": "#D0021B"},
-        {"name": "Epochs 50 to 80", "start": 50, "end": 80, "filename": "video_epochs_50_80.png", "color_tr": "#7ED321", "color_val": "#4A4A4A"}
+        {"name": "Epochs 50 to 80", "start": 50, "end": 80, "filename": "video_epochs_50_80.png", "color_tr": "#7ED321", "color_val": "#4A4A4A"},
+        {"name": "Epochs 80 to 100", "start": 80, "end": 100, "filename": "video_epochs_80_100.png", "color_tr": "#E2849A", "color_val": "#2CA02C"}
     ]
     
     # Configure styles for elite presentation
