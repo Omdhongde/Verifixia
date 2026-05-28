@@ -267,7 +267,7 @@ def validate(model, val_loader, criterion, device):
 
 def main():
     print("=" * 70)
-    print("🤖 Multi-Class Detector Training: Real vs Deepfake vs AI-Generated")
+    print("=== Multi-Class Detector Training: Real vs Deepfake vs AI-Generated ===")
     print("=" * 70)
     
     # Data paths
@@ -298,7 +298,7 @@ def main():
     
     # Load data
     if os.path.exists(data_path):
-        print(f"\n📂 Loading data from {data_path}")
+        print(f"\n[Data] Loading data from {data_path}")
         dataset = MultiClassDataset(data_path, transform=val_transform)
         
         train_size = int(0.8 * len(dataset))
@@ -315,26 +315,35 @@ def main():
         print(f"  Train: {len(train_dataset)} samples")
         print(f"  Val: {len(val_dataset)} samples")
     else:
-        print(f"❌ Data directory not found: {data_path}")
+        print(f"[Error] Data directory not found: {data_path}")
         return
-    
     # Model
     num_classes = 3
     model = MultiClassDetector(num_classes=num_classes).to(device)
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"\n✓ Model created with {total_params:,} parameters")
+    print(f"\n[OK] Model created with {total_params:,} parameters")
+    
+    # Load existing checkpoint to resume training if it exists
+    if os.path.exists(model_path):
+        try:
+            state_dict = torch.load(model_path, map_location=device)
+            model.load_state_dict(state_dict)
+            print(f"[OK] Loaded existing model weights from {model_path} to resume training")
+        except Exception as e:
+            print(f"[Warning] Could not load existing weights: {e}. Starting from scratch.")
     
     # Training setup
     criterion = nn.CrossEntropyLoss()  # For multi-class classification
     optimizer = optim.AdamW(model.parameters(), lr=0.0001, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
     
-    # Training loop
-    print(f"\n🚀 Starting training (50 epochs with early stopping)...\n")
-    
-    best_accuracy = 0
-    patience = 8
+    # Training loop configurations
+    total_epochs = 80
+    patience = 80  # Set patience to 80 to effectively disable early stopping
     patience_counter = 0
+    best_accuracy = 0
+    start_epoch = 0
+    
     history = {
         'train_loss': [],
         'train_acc': [],
@@ -345,8 +354,31 @@ def main():
         'val_f1': []
     }
     
-    for epoch in range(50):
-        print(f"--- Epoch {epoch+1}/50 ---")
+    # Load training history and best accuracy to resume cleanly
+    history_path = 'multiclass_training_history.json'
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, 'r') as f:
+                history = json.load(f)
+            start_epoch = len(history.get('train_loss', []))
+            print(f"[OK] Loaded training history. Resuming from epoch {start_epoch + 1}")
+        except Exception as e:
+            print(f"[Warning] Could not load history: {e}")
+            
+    info_path = 'multiclass_model_info.json'
+    if os.path.exists(info_path):
+        try:
+            with open(info_path, 'r') as f:
+                info = json.load(f)
+            best_accuracy = info.get('best_accuracy', 0.0)
+            print(f"[OK] Loaded best accuracy checkpoint: {best_accuracy:.4f}")
+        except Exception as e:
+            pass
+            
+    print(f"\n[Start] Starting training ({total_epochs} epochs, early stopping disabled, start_epoch={start_epoch})...\n")
+    
+    for epoch in range(start_epoch, total_epochs):
+        print(f"--- Epoch {epoch+1}/{total_epochs} ---")
         
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         val_metrics = validate(model, val_loader, criterion, device)
@@ -369,26 +401,27 @@ def main():
             best_accuracy = val_metrics['accuracy']
             patience_counter = 0
             torch.save(model.state_dict(), model_path)
-            print(f"✓ Best model saved (Acc: {best_accuracy:.4f})")
+            print(f"[OK] Best model saved (Acc: {best_accuracy:.4f})")
         else:
             patience_counter += 1
-            print(f"⏳ No improvement ({patience_counter}/{patience})")
+            print(f"[Info] No improvement ({patience_counter}/{patience})")
         
+        # Early stopping check disabled to train full 50 epochs
         if patience_counter >= patience:
-            print(f"\n⛔ Early stopping triggered after {epoch+1} epochs")
+            print(f"\n[Stop] Early stopping triggered after {epoch+1} epochs")
             break
         
         print()
     
     # Save results
     print("\n" + "=" * 70)
-    print(f"✓ Training completed! Best Validation Accuracy: {best_accuracy:.4f} ({best_accuracy*100:.2f}%)")
+    print(f"[OK] Training completed! Best Validation Accuracy: {best_accuracy:.4f} ({best_accuracy*100:.2f}%)")
     print("=" * 70)
     
     # Save training history
     with open('multiclass_training_history.json', 'w') as f:
         json.dump(history, f, indent=2)
-    print("✓ Training history saved")
+    print("[OK] Training history saved")
     
     # Model info
     model_info = {
@@ -404,9 +437,9 @@ def main():
     
     with open('multiclass_model_info.json', 'w') as f:
         json.dump(model_info, f, indent=2)
-    print("✓ Model info saved")
+    print("[OK] Model info saved")
     
-    print("\n✓ All training artifacts saved to models/")
+    print("\n[OK] All training artifacts saved to models/")
 
 if __name__ == "__main__":
     main()
