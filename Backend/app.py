@@ -854,18 +854,56 @@ def upload_image():
         # Save detection to Neon Database
         try:
             user_id = None
-            if user:
-                # Try to get or create user in database
-                # For now, we'll use None as user_id
-                pass
+            if user and user.get("uid"):
+                # Upsert user first to satisfy foreign key constraint
+                user_id = db.upsert_user(
+                    user_id=user.get("uid"),
+                    email=user.get("email"),
+                    username=user.get("display_name")
+                )
             
-            db_log = db.save_detection_log(
+            # Resolve file size in bytes
+            file_size = os.path.getsize(filepath) if os.path.exists(filepath) else None
+            
+            # Processing latency metrics
+            proc_time = result.get("processing_time", {}) or {}
+            processing_time_ms = int(proc_time.get("total_ms", 0))
+            
+            # Face scanner properties
+            face_count = result.get("face_count", 1)
+            prediction = result.get("prediction", "Unknown")
+            confidence = result.get("confidence", 0.0)
+            deepfake_detected = (prediction == "Fake" or prediction == "Deepfake")
+            
+            # Face metadata mapping
+            faces = result.get("faces", [])
+            if not faces:
+                faces = [{
+                    "label": prediction,
+                    "confidence": confidence,
+                    "position": {"x": 0, "y": 0, "w": 0, "h": 0},
+                    "quality": 100.0,
+                    "thumbnail": None
+                }]
+                face_count = 1
+            
+            # Save atomic analysis records, logs, and update stats
+            db_transaction_res = db.save_analysis_transaction(
+                user_id=user_id,
                 filename=unique_filename,
-                prediction=result.get("prediction"),
-                confidence=result.get("confidence", 0) / 100.0 if result.get("confidence", 0) > 1 else result.get("confidence", 0),
-                user_id=user_id
+                file_size=file_size,
+                face_count=face_count,
+                deepfake_detected=deepfake_detected,
+                overall_confidence=confidence,
+                faces_data=faces,
+                processing_time_ms=processing_time_ms,
+                faces=faces,
+                log_message=f"Scan complete: {filename} ({prediction} - {confidence:.1f}%)",
+                log_type="upload",
+                severity="info",
+                log_metadata=log_entry
             )
-            logger.info(f"✓ Detection saved to Neon Database: {db_log}")
+            logger.info(f"✓ Detection transaction completed successfully: {db_transaction_res}")
         except Exception as e:
             logger.warning(f"⚠ Could not save to Neon Database: {e}")
 

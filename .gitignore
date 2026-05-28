@@ -33,12 +33,13 @@ Frontend/.vite/
 dist/
 *.tsbuildinfo
 
-# ── Uploads & user data ───────────────────────────────────────────────────────
+# ── Uploads, Datasets & user data ──
 uploads/
 Backend/uploads/
 *.jsonl
 detection_logs.jsonl
 Backend/detection_logs.jsonl
+DATA/
 
 # ── Models (large binary files) ───────────────────────────────────────────────
 models/*.pkl
