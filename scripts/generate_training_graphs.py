@@ -28,16 +28,18 @@ def generate_graphs():
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = ["Inter", "Roboto", "Helvetica", "Arial"]
     
-    # ------------------ 1. IMAGE TRAINING GRAPHS (38 Epochs) ------------------
+    # ------------------ 1. IMAGE TRAINING GRAPHS (Dynamic Epochs) ------------------
     print("Generating Image model training graphs...")
     img_epochs = list(range(1, len(img_history["train_loss"]) + 1))
+    img_epoch_count = len(img_epochs)
+    peak_img_acc = max(img_history["val_acc"]) * 100
     
     fig, axs = plt.subplots(1, 2, figsize=(15, 6))
     
     # Loss curves
     axs[0].plot(img_epochs, img_history["train_loss"], label="Training Loss", color="#4A90E2", linewidth=2.5)
     axs[0].plot(img_epochs, img_history["val_loss"], label="Validation Loss", color="#D0021B", linewidth=2, linestyle="--")
-    axs[0].set_title("Image Model: Loss Progression", fontsize=13, fontweight="bold", pad=8)
+    axs[0].set_title(f"Image Model: Loss Progression ({img_epoch_count} Epochs)", fontsize=13, fontweight="bold", pad=8)
     axs[0].set_xlabel("Epochs", fontsize=11)
     axs[0].set_ylabel("Loss", fontsize=11)
     axs[0].legend(frameon=True, facecolor="white", framealpha=0.9, fontsize=10)
@@ -46,14 +48,14 @@ def generate_graphs():
     # Accuracy curves
     axs[1].plot(img_epochs, [a * 100 for a in img_history["train_acc"]], label="Training Accuracy", color="#4A90E2", linewidth=2.5)
     axs[1].plot(img_epochs, [a * 100 for a in img_history["val_acc"]], label="Validation Accuracy", color="#D0021B", linewidth=2, linestyle="--")
-    axs[1].axhline(75.0, color="#7ED321", linestyle=":", label="Peak Val Acc (75.0%)")
+    axs[1].axhline(peak_img_acc, color="#7ED321", linestyle=":", label=f"Peak Val Acc ({peak_img_acc:.1f}%)")
     axs[1].set_title("Image Model: Accuracy Curves", fontsize=13, fontweight="bold", pad=8)
     axs[1].set_xlabel("Epochs", fontsize=11)
     axs[1].set_ylabel("Accuracy (%)", fontsize=11)
     axs[1].legend(frameon=True, facecolor="white", framealpha=0.9, fontsize=10)
     axs[1].grid(True, alpha=0.4)
     
-    plt.suptitle("Verifixia Image Deepfake Detector - 38 Epochs Training Progression", fontsize=16, fontweight="bold", y=0.98)
+    plt.suptitle(f"Verifixia Image Deepfake Detector - {img_epoch_count} Epochs Training Progression", fontsize=16, fontweight="bold", y=0.98)
     plt.tight_layout()
     
     img_out = models_dir / "image_training_history.png"

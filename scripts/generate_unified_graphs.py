@@ -40,11 +40,13 @@ def generate_graphs():
     
     # ==================== ROW 1: BINARY IMAGE DETECTOR (EfficientNet-B0) ====================
     img_epochs = list(range(1, len(img_history["train_loss"]) + 1))
+    img_epoch_count = len(img_epochs)
+    peak_img_acc = max(img_history["val_acc"]) * 100
     
     # BCE Loss
     axs[0, 0].plot(img_epochs, img_history["train_loss"], label="Training Loss", color="#4A90E2", linewidth=2.5)
     axs[0, 0].plot(img_epochs, img_history["val_loss"], label="Validation Loss", color="#D0021B", linewidth=2, linestyle="--")
-    axs[0, 0].set_title("Image Model: BCE Loss Progression (38 Epochs)", fontsize=13, fontweight="bold", pad=8)
+    axs[0, 0].set_title(f"Image Model: BCE Loss Progression ({img_epoch_count} Epochs)", fontsize=13, fontweight="bold", pad=8)
     axs[0, 0].set_xlabel("Epochs", fontsize=10)
     axs[0, 0].set_ylabel("Loss", fontsize=10)
     axs[0, 0].legend(frameon=True, facecolor="white", framealpha=0.9, fontsize=9)
@@ -53,7 +55,7 @@ def generate_graphs():
     # Accuracy
     axs[0, 1].plot(img_epochs, [a * 100 for a in img_history["train_acc"]], label="Training Accuracy", color="#4A90E2", linewidth=2.5)
     axs[0, 1].plot(img_epochs, [a * 100 for a in img_history["val_acc"]], label="Validation Accuracy", color="#D0021B", linewidth=2, linestyle="--")
-    axs[0, 1].axhline(75.0, color="#7ED321", linestyle=":", label="Peak Accuracy (75.0%)")
+    axs[0, 1].axhline(peak_img_acc, color="#7ED321", linestyle=":", label=f"Peak Accuracy ({peak_img_acc:.1f}%)")
     axs[0, 1].set_title("Image Model: Classification Accuracy curves", fontsize=13, fontweight="bold", pad=8)
     axs[0, 1].set_xlabel("Epochs", fontsize=10)
     axs[0, 1].set_ylabel("Accuracy (%)", fontsize=10)
