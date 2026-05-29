@@ -266,12 +266,19 @@ def validate(model, val_loader, criterion, device):
     }
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--epochs', type=int, default=80, help='Number of epochs to train')
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
+    parser.add_argument('--data_dir', default='../DATA', help='Path to dataset directory')
+    args_parsed = parser.parse_args()
+
     print("=" * 70)
     print("=== Multi-Class Detector Training: Real vs Deepfake vs AI-Generated ===")
     print("=" * 70)
     
     # Data paths
-    data_path = '../DATA'
+    data_path = args_parsed.data_dir
     model_path = 'multiclass_detector.pth'
     
     # Transforms
@@ -308,7 +315,7 @@ def main():
         train_dataset.dataset.transform = train_transform
         val_dataset.dataset.transform = val_transform
         
-        batch_size = 32
+        batch_size = args_parsed.batch_size
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
         
@@ -338,8 +345,8 @@ def main():
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
     
     # Training loop configurations
-    total_epochs = 80
-    patience = 80  # Set patience to 80 to effectively disable early stopping
+    total_epochs = args_parsed.epochs
+    patience = args_parsed.epochs  # Set patience to epochs to effectively disable early stopping
     patience_counter = 0
     best_accuracy = 0
     start_epoch = 0

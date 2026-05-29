@@ -1,9 +1,22 @@
 {
   "model_name": "Verifixia Video-Extracted Deepfake Detector",
-  "epochs_trained": 100,
+  "epochs_trained": 30,
   "dataset": "DeeperForensics local videos",
-  "best_accuracy": 0.723404255319149,
-  "timestamp": "2026-05-28T20:44:32.298675",
+  "best_validation_accuracy": 0.8477011494252874,
+  "test_loss": 0.7149396332410666,
+  "test_accuracy": 0.7058823529411765,
+  "test_precision": 0.0,
+  "test_recall": 0.0,
+  "test_f1": 0.0,
+  "test_roc_auc": 0.2744134078212291,
+  "optimal_threshold": 0.5,
+  "confusion_matrix": {
+    "true_negatives": 144,
+    "false_positives": 35,
+    "false_negatives": 25,
+    "true_positives": 0
+  },
+  "timestamp": "2026-05-29T22:42:02.816410",
   "framework": "PyTorch",
   "device": "cpu"
 }

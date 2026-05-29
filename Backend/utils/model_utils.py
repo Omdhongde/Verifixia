@@ -85,15 +85,15 @@ if _TORCH_AVAILABLE:
             # Classification head with bottleneck
             self.fc1 = nn.Linear(512 * 2, 1024)
             self.bn_fc1 = nn.BatchNorm1d(1024)
-            self.dropout1 = nn.Dropout(0.5)
+            self.dropout1 = nn.Dropout(0.6)
             
             self.fc2 = nn.Linear(1024, 512)
             self.bn_fc2 = nn.BatchNorm1d(512)
-            self.dropout2 = nn.Dropout(0.4)
+            self.dropout2 = nn.Dropout(0.5)
             
             self.fc3 = nn.Linear(512, 256)
             self.bn_fc3 = nn.BatchNorm1d(256)
-            self.dropout3 = nn.Dropout(0.3)
+            self.dropout3 = nn.Dropout(0.4)
             
             self.fc_out = nn.Linear(256, 1)
             self.sigmoid = nn.Sigmoid()
@@ -352,7 +352,10 @@ class ModelUtils:
             }
         else:
             # Binary prediction
-            confidence_raw = output.item()
+            # Since model was trained with 0=Fake, 1=Real, the sigmoid output
+            # represents probability of being Real. Therefore, the probability
+            # of being Fake is 1.0 - output.item().
+            confidence_raw = 1.0 - output.item()
             
             # Determine prediction
             prediction = "Fake" if confidence_raw > 0.5 else "Real"

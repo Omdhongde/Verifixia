@@ -298,7 +298,7 @@ def predict_deepfake_sklearn(image_path: str) -> dict:
 def predict_deepfake_video(video_path: str = None):
     """Frame-sample based prediction for video uploads.
 
-    Extracts up to 5 evenly-spaced frames from the video and runs the
+    Extracts up to 25 evenly-spaced frames from the video and runs the
     same image prediction pipeline on each, then aggregates results.
     Falls back to a neutral 'Unknown' result if frame extraction fails.
     """
@@ -314,8 +314,8 @@ def predict_deepfake_video(video_path: str = None):
                 # For animated GIFs
                 frames_extracted.append(vid_img.copy().convert("RGB"))
                 try:
-                    for i in range(1, 5):
-                        vid_img.seek(i * max(1, getattr(vid_img, 'n_frames', 1) // 5))
+                    for i in range(1, 25):
+                        vid_img.seek(i * max(1, getattr(vid_img, 'n_frames', 1) // 25))
                         frames_extracted.append(vid_img.copy().convert("RGB"))
                 except EOFError:
                     pass
@@ -328,7 +328,7 @@ def predict_deepfake_video(video_path: str = None):
                 import cv2  # type: ignore
                 cap = cv2.VideoCapture(video_path)
                 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 30
-                for idx in range(0, min(5, total), max(1, total // 5)):
+                for idx in range(0, min(25, total), max(1, total // 25)):
                     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                     ret, frame = cap.read()
                     if ret:
@@ -362,7 +362,21 @@ def predict_deepfake_video(video_path: str = None):
         return "Unknown", 0.5
 
     avg_score = sum(fake_scores) / len(fake_scores)
-    prediction = "Fake" if avg_score > 0.55 else "Real"
+    
+    # Load optimal threshold from deeperforensics_info.json if available
+    threshold = 0.5
+    try:
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        info_path = os.path.join(backend_dir, "..", "models", "deeperforensics_info.json")
+        if os.path.exists(info_path):
+            with open(info_path, "r") as f:
+                info_data = json.load(f)
+            threshold = info_data.get("optimal_threshold", 0.5)
+            logger.info(f"Loaded optimal decision threshold {threshold} from deeperforensics_info.json")
+    except Exception as e:
+        logger.warning(f"Failed to load optimal threshold from deeperforensics_info.json: {e}")
+
+    prediction = "Fake" if avg_score > threshold else "Real"
     return prediction, avg_score
 
 def _is_cartoon_or_synthetic_art(image_path: str) -> bool:
