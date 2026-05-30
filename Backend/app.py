@@ -57,7 +57,9 @@ MODEL_URL = os.getenv("MODEL_URL")
 SKLEARN_URL = os.getenv("SKLEARN_URL")
 PYTORCH_AVAILABLE = False
 SKLEARN_AVAILABLE = False
-model = None
+multiclass_model = None
+binary_model = None
+model = None  # Backward-compatible pointer to primary active model
 sklearn_model = None
 DEVICE = "cpu"
 MODEL_TYPE = "binary"  # "binary" or "multiclass"
@@ -85,32 +87,92 @@ def _download_if_missing(path: str, url: str):
         logger.warning(f"Failed to download model from {url}: {ex}")
         return False
 
-# Try to load PyTorch model
+# Try to load PyTorch models (both Multi-Class and Binary)
 try:
     import torch
-    from utils.model_utils import ModelUtils
+    from utils.model_utils import ModelUtils, MultiClassDetector, DeepfakeDetector
 
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     PYTORCH_AVAILABLE = True
-    logger.info("PyTorch is available. Attempting to load model...")
+    logger.info(f"PyTorch is available. Attempting to load models on device: {DEVICE}...")
 
-    # attempt automatic download if missing
-    if not os.path.exists(MODEL_PATH) and MODEL_URL:
-        _download_if_missing(MODEL_PATH, MODEL_URL)
+    # Define absolute paths
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    multiclass_path = os.path.normpath(os.path.join(backend_dir, "..", "models", "multiclass_detector.pth"))
+    binary_path = os.path.normpath(os.path.join(backend_dir, "..", "models", "xception_deepfake.pth"))
 
-    model, DEVICE, MODEL_TYPE = ModelUtils.load_model(MODEL_PATH)
-    model_info = ModelUtils.get_model_info(MODEL_PATH)
-    model_metadata = ModelUtils.get_model_metadata(model, DEVICE)
-    model_info.update(model_metadata)
+    # Attempt automatic download for binary model if missing
+    if not os.path.exists(binary_path) and MODEL_URL:
+        _download_if_missing(binary_path, MODEL_URL)
 
-    logger.info(f"Model loaded successfully on device: {DEVICE}")
-    logger.info(f"Model type: {MODEL_TYPE}")
-    logger.info(f"Model info: {model_info}")
+    # 1. Load Multi-Class model
+    if os.path.exists(multiclass_path):
+        try:
+            multiclass_model = MultiClassDetector(num_classes=3)
+            state_dict = torch.load(multiclass_path, map_location=DEVICE)
+            multiclass_model.load_state_dict(state_dict)
+            multiclass_model.to(DEVICE)
+            multiclass_model.eval()
+            logger.info(f"✓ Multi-class model loaded successfully from {multiclass_path}")
+        except Exception as me:
+            logger.warning(f"⚠ Could not load multi-class model: {me}")
+            multiclass_model = None
+
+    # 2. Load Binary model
+    if os.path.exists(binary_path):
+        try:
+            binary_model = DeepfakeDetector()
+            state_dict = torch.load(binary_path, map_location=DEVICE)
+            binary_model.load_state_dict(state_dict)
+            binary_model.to(DEVICE)
+            binary_model.eval()
+            logger.info(f"✓ Binary model loaded successfully from {binary_path}")
+        except Exception as be:
+            logger.warning(f"⚠ Could not load binary model: {be}")
+            binary_model = None
+
+    # Assign primary model pointer for backward compatibility
+    if multiclass_model is not None:
+        model = multiclass_model
+        MODEL_TYPE = "multiclass"
+        model_info = ModelUtils.get_model_info(multiclass_path)
+        model_info.update({
+            "model_name": "Verifixia AI Multi-Class Detector",
+            "version": "3.0.0",
+            "architecture": "ResNet-inspired with SE-Attention",
+            "model_type": "multiclass",
+            "status": "loaded"
+        })
+        try:
+            model_metadata = ModelUtils.get_model_metadata(multiclass_model, DEVICE)
+            model_info.update(model_metadata)
+        except Exception:
+            pass
+    elif binary_model is not None:
+        model = binary_model
+        MODEL_TYPE = "binary"
+        model_info = ModelUtils.get_model_info(binary_path)
+        model_info.update({
+            "model_name": "Verifixia AI Xception",
+            "version": "2.4.1",
+            "architecture": "Xception-based CNN",
+            "model_type": "binary",
+            "status": "loaded"
+        })
+        try:
+            model_metadata = ModelUtils.get_model_metadata(binary_model, DEVICE)
+            model_info.update(model_metadata)
+        except Exception:
+            pass
+    else:
+        PYTORCH_AVAILABLE = False
+        logger.warning("No PyTorch models could be loaded.")
 
 except Exception as e:
-    logger.warning(f"Could not load PyTorch model: {e}")
-    logger.warning("Checking for scikit-learn model …")
+    logger.warning(f"Could not load PyTorch models: {e}")
     PYTORCH_AVAILABLE = False
     model = None
+
 
 # Try to load scikit-learn model (trained via scripts/train_sklearn.py)
 if not PYTORCH_AVAILABLE:
@@ -464,18 +526,19 @@ def predict_deepfake(image_path):
             },
         }
 
-    # Tier 1: PyTorch deep learning model
-    if PYTORCH_AVAILABLE and model is not None:
-        try:
-            from utils.model_utils import ModelUtils
-            # Preprocess image
-            image_tensor, preprocessing_time = ModelUtils.preprocess_image(image_path)
-            
-            # Make prediction with model type
-            prediction_result = ModelUtils.predict_image(model, image_tensor, DEVICE, MODEL_TYPE)
-            
-            # Handle both binary and multiclass results
-            if MODEL_TYPE == "multiclass":
+    # Tier 1: PyTorch deep learning model(s) with fallback
+    if PYTORCH_AVAILABLE:
+        image_tensor = None
+        preprocessing_time = 0.0
+        
+        # 1a. Try Multi-Class Model first
+        if multiclass_model is not None:
+            try:
+                from utils.model_utils import ModelUtils
+                image_tensor, preprocessing_time = ModelUtils.preprocess_image(image_path)
+                
+                prediction_result = ModelUtils.predict_image(multiclass_model, image_tensor, DEVICE, "multiclass")
+                
                 result = {
                     "prediction": prediction_result["prediction"],
                     "confidence": prediction_result["confidence"],
@@ -499,8 +562,21 @@ def predict_deepfake(image_path):
                         "device": str(DEVICE)
                     }
                 }
-            else:
-                # Binary model result
+                
+                logger.info(f"Multi-class Model Prediction: {result['prediction']}, Confidence: {result['confidence']:.2f}%")
+                return result
+            except Exception as e:
+                logger.error(f"Error making multi-class model prediction: {e}")
+                logger.warning("Falling back to PyTorch Binary model")
+        
+        # 1b. Try Binary Model as fallback
+        if binary_model is not None:
+            try:
+                from utils.model_utils import ModelUtils
+                if image_tensor is None:
+                    image_tensor, preprocessing_time = ModelUtils.preprocess_image(image_path)
+                
+                prediction_result = ModelUtils.predict_image(binary_model, image_tensor, DEVICE, "binary")
                 confidence_interpretation = ModelUtils.interpret_confidence(
                     prediction_result["confidence_raw"]
                 )
@@ -510,7 +586,7 @@ def predict_deepfake(image_path):
                     "confidence": prediction_result["confidence"],
                     "confidence_raw": prediction_result["confidence_raw"],
                     "threat_level": prediction_result["threat_level"],
-                    "model_used": "Verifixia AI Xception v2.4.1",
+                    "model_used": "Verifixia AI Xception v2.4.1 (Fallback)",
                     "processing_time": {
                         "preprocessing_ms": round(preprocessing_time * 1000, 2),
                         "inference_ms": prediction_result["inference_time_ms"],
@@ -524,14 +600,13 @@ def predict_deepfake(image_path):
                         "device": str(DEVICE)
                     }
                 }
-            
-            logger.info(f"Model Prediction: {result['prediction']}, Confidence: {result['confidence']:.2f}%")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error making model prediction: {e}")
-            logger.warning("Falling back to sklearn / heuristic prediction")
-            # Fall through to next tier
+                
+                logger.info(f"Binary Model Prediction (Fallback): {result['prediction']}, Confidence: {result['confidence']:.2f}%")
+                return result
+            except Exception as e:
+                logger.error(f"Error making binary model prediction: {e}")
+                logger.warning("Falling back to sklearn / heuristic prediction")
+                # Fall through to next tier
 
     # Tier 2: scikit-learn SVM model (trained via scripts/train_sklearn.py)
     if SKLEARN_AVAILABLE and sklearn_model is not None:
