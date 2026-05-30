@@ -200,6 +200,28 @@ class MultiClassDataset(Dataset):
         
         return image, torch.tensor(label, dtype=torch.long)
 
+class SubsetDataset(Dataset):
+    """Wrapper for PyTorch Subset to apply split-specific transforms safely"""
+    def __init__(self, subset, transform=None):
+        self.subset = subset
+        self.transform = transform
+        
+    def __getitem__(self, idx):
+        # Resolve index in the original dataset
+        img_path, label, _ = self.subset.dataset.samples[self.subset.indices[idx]]
+        try:
+            image = Image.open(img_path).convert('RGB')
+        except Exception as e:
+            image = Image.new('RGB', (299, 299))
+            
+        if self.transform:
+            image = self.transform(image)
+            
+        return image, torch.tensor(label, dtype=torch.long)
+        
+    def __len__(self):
+        return len(self.subset)
+
 # ============================================================================
 # Training
 # ============================================================================
@@ -310,10 +332,10 @@ def main():
         
         train_size = int(0.8 * len(dataset))
         val_size = len(dataset) - train_size
-        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+        train_sub, val_sub = random_split(dataset, [train_size, val_size])
         
-        train_dataset.dataset.transform = train_transform
-        val_dataset.dataset.transform = val_transform
+        train_dataset = SubsetDataset(train_sub, transform=train_transform)
+        val_dataset = SubsetDataset(val_sub, transform=val_transform)
         
         batch_size = args_parsed.batch_size
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
