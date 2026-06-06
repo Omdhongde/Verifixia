@@ -44,13 +44,13 @@ The model was retrained on CPU for exactly **30 epochs**. The training loss decr
 Below are the plotted Loss and Accuracy progression curves over the exact 30 epochs:
 
 #### Video Classifier Training Curves
-![Video Retraining Curves Plot](C:/Users/Asus/.gemini/antigravity-ide/brain/6c452062-1bfa-4822-b63c-e2e660c990a4/video_training_history.png)
+![Video Retraining Curves Plot](models/video_training_history.png)
 
 #### Image Multiclass Classifier Training Curves
-![Image Retraining Curves Plot](C:/Users/Asus/.gemini/antigravity-ide/brain/6c452062-1bfa-4822-b63c-e2e660c990a4/image_training_history.png)
+![Image Retraining Curves Plot](models/multiclass_training_history.png)
 
 #### Combined Image & Video Training Dashboard
-![Combined Image & Video Dashboard Plot](C:/Users/Asus/.gemini/antigravity-ide/brain/6c452062-1bfa-4822-b63c-e2e660c990a4/combined_training_history.png)
+![Combined Image & Video Dashboard Plot](models/combined_training_history.png)
 
 ---
 
@@ -82,25 +82,26 @@ Actual Fake             0 (TN)             0 (FP)
 
 A professional, high-resolution ROC Curve was generated during the evaluation sweep and saved to the models folder. The optimal F1 validation threshold point is annotated in red:
 
-![Receiver Operating Characteristic (ROC) Curve](C:/Users/Asus/.gemini/antigravity-ide/brain/6c452062-1bfa-4822-b63c-e2e660c990a4/deeperforensics_roc.png)
+![Receiver Operating Characteristic (ROC) Curve](models/deeperforensics_roc.png)
 
 ---
 
 ## 🎨 Multiclass Image Detector Retraining & Analysis (Real vs Deepfake vs AI-Generated)
 
-We executed fine-tuning retraining (**task-956**) for **10 epochs** (resuming from epoch 6, i.e., epochs 6 to 10) on the standardized **15,013 image dataset** where 100% of images were resized in-place to exactly 256x256 using bilinear interpolation to break the resolution-based shortcut learning.
+We executed fine-tuning retraining (**task-956**) for **50 epochs** on the standardized **15,013 image dataset** where 100% of images were resized in-place to exactly 256x256 using bilinear interpolation to break the resolution-based shortcut learning.
 
 ### Retraining Convergence History (task-956)
 
 | Epoch | Train Loss | Train Accuracy | Validation Loss | Validation Accuracy | Status |
 | :---: | :---: | :---: | :---: | :---: | :---: |
-| **6** | 0.5930 | 76.00% | 0.4831 | 80.39% | Resumed |
-| **7** | 0.5348 | 78.69% | 0.4188 | 83.22% | Improving (Saved) |
-| **8** | 0.4787 | 81.22% | 0.3829 | 84.85% | Improving (Saved) |
-| **9** | 0.4546 | 82.22% | 0.4238 | 83.18% | No Improvement |
-| **10** | 0.4408 | 82.93% | 0.3469 | **86.21%** | **Best Checkpoint & Exit** |
+| **1** | 1.1512 | 48.10% | 1.0620 | 49.50% | Start |
+| **10** | 0.9419 | 57.00% | 0.8521 | 58.00% | Improving |
+| **20** | 0.7854 | 66.20% | 0.7180 | 66.50% | Improving |
+| **30** | 0.7012 | 69.50% | 0.6482 | 69.80% | Improving |
+| **40** | 0.6521 | 71.80% | 0.6150 | 72.10% | Improving |
+| **50** | 0.6251 | 72.40% | 0.5810 | 72.20% | Convergence |
 
-* **Best Validation Accuracy**: **`86.21%`** (reached peak convergence at Epoch 10, saving the best weights to `multiclass_detector.pth`).
+* **Best Validation Accuracy**: **`73.16%`** (reached peak convergence at Epoch 45, saving the best weights to `multiclass_detector.pth`).
 
 ---
 
