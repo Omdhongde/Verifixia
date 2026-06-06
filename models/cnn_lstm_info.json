@@ -1,0 +1,11 @@
+{
+  "model_name": "Verifixia CNN-LSTM Video Deepfake Detector",
+  "epochs_trained": 30,
+  "test_accuracy": 1.0,
+  "test_precision": 0.0,
+  "test_recall": 0.0,
+  "test_f1": 0.0,
+  "timestamp": "2026-06-05T11:22:35.886790",
+  "framework": "PyTorch",
+  "device": "cpu"
+}

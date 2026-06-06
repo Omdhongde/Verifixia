@@ -86,48 +86,68 @@ A professional, high-resolution ROC Curve was generated during the evaluation sw
 
 ---
 
-## 🎨 Multiclass Image Detector Retraining (Real vs Deepfake vs AI-Generated)
+## 🎨 Multiclass Image Detector Retraining & Analysis (Real vs Deepfake vs AI-Generated)
 
-We executed fresh retraining for **30 epochs** on the local dataset containing **15,000 perfectly balanced images** (5,000 Real, 5,000 Deepfake, 5,000 AI-Generated).
+We executed fine-tuning retraining (**task-956**) for **10 epochs** (resuming from epoch 6, i.e., epochs 6 to 10) on the standardized **15,013 image dataset** where 100% of images were resized in-place to exactly 256x256 using bilinear interpolation to break the resolution-based shortcut learning.
 
-### Epoch-by-Epoch Image Training Convergence History
+### Retraining Convergence History (task-956)
 
 | Epoch | Train Loss | Train Accuracy | Validation Loss | Validation Accuracy | Status |
 | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1** | 1.1425 | 46.9% | 0.8243 | 62.0% | Start |
-| **2** | 0.8433 | 63.9% | 0.6271 | 73.8% | Improving |
-| **6** | 0.5152 | 79.6% | 0.4925 | 80.9% | Improving |
-| **11** | 0.4152 | 85.2% | 0.3784 | 85.9% | Improving |
-| **16** | 0.3256 | 90.7% | 0.3676 | 87.0% | Improving |
-| **21** | 0.2748 | 92.1% | 0.3468 | 88.6% | Improving |
-| **24** | 0.2632 | 92.8% | 0.3234 | 87.9% | Improving |
-| **26** | 0.2558 | 93.2% | 0.3320 | 88.5% | Improving |
-| **30** | 0.2496 | 93.3% | 0.3212 | **89.1%** | **Best Checkpoint & Convergence** |
+| **6** | 0.5930 | 76.00% | 0.4831 | 80.39% | Resumed |
+| **7** | 0.5348 | 78.69% | 0.4188 | 83.22% | Improving (Saved) |
+| **8** | 0.4787 | 81.22% | 0.3829 | 84.85% | Improving (Saved) |
+| **9** | 0.4546 | 82.22% | 0.4238 | 83.18% | No Improvement |
+| **10** | 0.4408 | 82.93% | 0.3469 | **86.21%** | **Best Checkpoint & Exit** |
 
-* **Best Validation Accuracy**: **`89.10%`** (reached peak generalization convergence on the 3-class classification task).
-* **Generalization**: Squeeze-and-Excitation residual channels successfully eliminated memorization, leading to an extremely robust multiclass prediction mapping.
+* **Best Validation Accuracy**: **`86.21%`** (reached peak convergence at Epoch 10, saving the best weights to `multiclass_detector.pth`).
 
 ---
 
-## 🛠️ Backend Integration & Inversion Bug Resolution
+## 🔍 Accuracy Distribution & Test Verification
 
-The Flask backend server was successfully refactored and restarted to load the new weights, dynamic threshold, and frame density seamlessly:
+Following retraining, we evaluated the model's predictions on 200 random samples from each dataset class to measure overall robustness:
 
-### 1. Inversion Bug Fix (`Backend/utils/model_utils.py`)
+### Test Set Accuracy Distribution (Sample Size: 200 per class)
+* **True Real Images**:
+  * Predicted as **Real**: **`76.50%`** (153/200)
+  * Predicted as **Deepfake**: **`14.00%`** (28/200)
+  * Predicted as **AI-Generated**: **`9.50%`** (19/200)
+* **True Deepfake Images**:
+  * Predicted as **Deepfake**: **`95.50%`** (191/200)
+  * Predicted as **Real**: **`3.50%`** (7/200)
+  * Predicted as **AI-Generated**: **`1.00%`** (2/200)
+* **True AI-Generated Images**:
+  * Predicted as **AI-Generated**: **`91.50%`** (183/200)
+  * Predicted as **Real**: **`7.50%`** (15/200)
+  * Predicted as **Deepfake**: **`1.00%`** (2/200)
+
+---
+
+## 💡 In-Depth Analysis of False Positives on Real Images
+
+Despite breaking the basic resolution boundary (by standardizing files to 256x256), the model still classifies certain real images (such as `Real_92.jpg`, `Real_166.jpg`, and `Real_476.jpg`) as **Deepfake** with high confidence. Our analysis revealed two active hidden shortcut biases:
+
+### 1. The Composition & Framing Shortcut
+> [!WARNING]
+> - **Deepfake dataset samples** are strictly **tight face crops** (containing only the face bounding box).
+> - **Real dataset samples** are **full snapshots** (containing background context, shoulders, clothing, and environment).
+> - Even with a uniform resolution, the model learns that *any close-up face crop* is a Deepfake. When a user uploads a high-quality close-up real portrait, the model focuses on the crop framing and misclassifies it as a Deepfake.
+
+### 2. The Double-Interpolation Bottleneck
 > [!IMPORTANT]
-> The binary PyTorch model was originally trained with `0` representing **Fake** and `1` representing **Real** (so raw outputs close to `0` are Fake).
-> However, the backend was incorrectly interpreting raw outputs `> 0.5` as Fake, completely **inverting** inference predictions! We successfully fixed this bug by mapping:
-> `confidence_raw = 1.0 - output.item()`
-> This correctly translates raw sigmoid outputs to true Deepfake probabilities (high values = Fake, low values = Real).
+> - **Training Pipeline**: Real images (originally 640x480) and AI-generated images (originally 1024x1024) were downsampled to 256x256 (first interpolation), then resized to 299x299 in the DataLoader (second interpolation), introducing a double-interpolation artifact.
+> - **Direct Uploads**: Uploading a 640x480 real image resizes it directly to 299x299 in the backend (single-interpolation). This single-interpolation pattern matches the Deepfake training images (256x256 -> 299x299), which only underwent one interpolation. The model misinterprets this single-interpolation pattern as a Deepfake indicator.
 
-### 2. High-Density Sampling Synchronization (`Backend/app.py`)
-* Modified `predict_deepfake_video` inside the backend [app.py](file:///d:/Final%20project%20folo/Verifixia/Backend/app.py) to sample **25 frames** per video instead of 5, matching the high resolution of the trained classifier.
-
-### 3. Dynamic Threshold Application
-* The backend now automatically checks for the existence of `models/deeperforensics_info.json` and loads the optimal validation sweep threshold (`0.50`) to evaluate video frames dynamically, ensuring optimal accuracy at runtime.
+### Long-Term Resolution Recommendations
+1. **Apply Uniform Face-Cropping**: Use a face-detector (like MTCNN or OpenCV Haar Cascades) to crop faces from both the Real and Deepfake classes *before* training. This ensures identical framing and composition across all classes.
+2. **Re-Train from Scratch**: Once framing is standardized, retrain the CNN from scratch (without pre-trained shortcut weights) for 30 epochs to completely eliminate interpolation/framing biases.
 
 ---
 
-## ⚡ Active Infrastructure Status
-1. **Flask Backend API**: Serving on [http://localhost:3001](http://localhost:3001) using the newly trained Squeeze-and-Excitation video model weights and optimal threshold configuration.
-2. **React/Vite Frontend App**: Serving on [http://localhost:8085](http://localhost:8085).
+## 🛠️ Backend Integration & Updated Weights
+
+1. **Model Weights Copied**: The updated model weights (`multiclass_detector.pth`), history, and info JSONs were copied from the root folder to the `models/` directory.
+2. **Backend Restarted**: The Flask server (**task-1105**) was successfully restarted and hot-loaded the fresh `multiclass_detector.pth` model on startup.
+3. **Frontend Server Active**: React Vite frontend is serving on [http://localhost:8085](http://localhost:8085).
+  

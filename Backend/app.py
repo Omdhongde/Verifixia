@@ -59,6 +59,7 @@ PYTORCH_AVAILABLE = False
 SKLEARN_AVAILABLE = False
 multiclass_model = None
 binary_model = None
+cnn_lstm_model = None
 model = None  # Backward-compatible pointer to primary active model
 sklearn_model = None
 DEVICE = "cpu"
@@ -90,7 +91,7 @@ def _download_if_missing(path: str, url: str):
 # Try to load PyTorch models (both Multi-Class and Binary)
 try:
     import torch
-    from utils.model_utils import ModelUtils, MultiClassDetector, DeepfakeDetector
+    from utils.model_utils import ModelUtils, MultiClassDetector, DeepfakeDetector, CNNLSTMDetector
 
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     PYTORCH_AVAILABLE = True
@@ -130,6 +131,20 @@ try:
         except Exception as be:
             logger.warning(f"⚠ Could not load binary model: {be}")
             binary_model = None
+
+    # 3. Load CNN-LSTM model
+    cnn_lstm_path = os.path.normpath(os.path.join(backend_dir, "..", "models", "cnn_lstm_deepfake.pth"))
+    if os.path.exists(cnn_lstm_path):
+        try:
+            cnn_lstm_model = CNNLSTMDetector()
+            state_dict = torch.load(cnn_lstm_path, map_location=DEVICE)
+            cnn_lstm_model.load_state_dict(state_dict)
+            cnn_lstm_model.to(DEVICE)
+            cnn_lstm_model.eval()
+            logger.info(f"✓ CNN-LSTM model loaded successfully from {cnn_lstm_path}")
+        except Exception as cle:
+            logger.warning(f"⚠ Could not load CNN-LSTM model: {cle}")
+            cnn_lstm_model = None
 
     # Assign primary model pointer for backward compatibility
     if multiclass_model is not None:
@@ -358,22 +373,19 @@ def predict_deepfake_sklearn(image_path: str) -> dict:
 
 
 def predict_deepfake_video(video_path: str = None):
-    """Frame-sample based prediction for video uploads.
+    """Sequence-based prediction for video uploads using CNN-LSTM.
 
-    Extracts up to 25 evenly-spaced frames from the video and runs the
-    same image prediction pipeline on each, then aggregates results.
-    Falls back to a neutral 'Unknown' result if frame extraction fails.
+    Extracts up to 25 evenly-spaced frames from the video, preprocesses them 
+    into a sequence tensor of shape (1, 25, 3, 299, 299), and queries the CNN-LSTM model.
+    Falls back to frame-averaging if CNN-LSTM is unavailable.
     """
     if video_path is None or not os.path.exists(video_path):
         return "Unknown", 0.5
 
     frames_extracted = []
     try:
-        # Try to extract frames using PIL + seeking via file read
-        # Use a lightweight approach: try to open with PIL directly (GIF/animated)
         try:
             with Image.open(video_path) as vid_img:
-                # For animated GIFs
                 frames_extracted.append(vid_img.copy().convert("RGB"))
                 try:
                     for i in range(1, 25):
@@ -384,10 +396,9 @@ def predict_deepfake_video(video_path: str = None):
         except Exception:
             pass
 
-        # If no frames yet, try OpenCV (optional dependency)
         if not frames_extracted:
             try:
-                import cv2  # type: ignore
+                import cv2
                 cap = cv2.VideoCapture(video_path)
                 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 30
                 for idx in range(0, min(25, total), max(1, total // 25)):
@@ -406,7 +417,35 @@ def predict_deepfake_video(video_path: str = None):
         logger.warning("Could not extract frames from video – returning Unknown")
         return "Unknown", 0.5
 
-    # Save frames to temp files and run image prediction on each
+    global cnn_lstm_model
+    if PYTORCH_AVAILABLE and cnn_lstm_model is not None:
+        try:
+            from torchvision import transforms
+            tensors = []
+            while len(frames_extracted) < 25:
+                frames_extracted.append(frames_extracted[-1])
+            frames_extracted = frames_extracted[:25]
+            
+            transform = transforms.Compose([
+                transforms.Resize((299, 299)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            for frame_img in frames_extracted:
+                tensors.append(transform(frame_img))
+            
+            seq_tensor = torch.stack(tensors, dim=0).unsqueeze(0).to(DEVICE)
+            with torch.no_grad():
+                output = cnn_lstm_model(seq_tensor)
+                confidence_raw = 1.0 - output.item()  # 0 = Fake, 1 = Real
+                
+            prediction = "Fake" if confidence_raw > 0.5 else "Real"
+            logger.info(f"CNN-LSTM Video Prediction: {prediction}, Confidence: {confidence_raw*100:.2f}%")
+            return prediction, confidence_raw
+        except Exception as clee:
+            logger.error(f"Error running CNN-LSTM prediction: {clee}. Falling back to frame-averaging.")
+
+    # Fallback to frame-averaging
     import tempfile
     fake_scores = []
     for i, frame_img in enumerate(frames_extracted):
@@ -424,8 +463,6 @@ def predict_deepfake_video(video_path: str = None):
         return "Unknown", 0.5
 
     avg_score = sum(fake_scores) / len(fake_scores)
-    
-    # Load optimal threshold from deeperforensics_info.json if available
     threshold = 0.5
     try:
         backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -488,7 +525,7 @@ def _is_cartoon_or_synthetic_art(image_path: str) -> bool:
             return True
 
         # 3. Flat background/solid digital art vector icons
-        if unique_colors < 200:
+        if unique_colors < 20:
             return True
 
         return False

@@ -244,9 +244,75 @@ if _TORCH_AVAILABLE:
             
             x = self.fc_out(x)
             return x
+
+    class CNNLSTMDetector(nn.Module):
+        """CNN-LSTM Detector: Extracts frame features using a 2D CNN, 
+        then uses an LSTM to analyze temporal relations across sequence of frames."""
+        def __init__(self, latent_dim=512, lstm_hidden_dim=256, lstm_layers=1):
+            super().__init__()
+            # Use the feature extraction part of DeepfakeDetector
+            base_model = DeepfakeDetector()
+            self.cnn = nn.Sequential(
+                base_model.conv1,
+                base_model.bn1,
+                base_model.relu,
+                base_model.maxpool,
+                base_model.layer1,
+                base_model.layer2,
+                base_model.layer3,
+                base_model.layer4,
+            )
+            self.avgpool = base_model.avg_pool
+            self.maxpool = base_model.max_pool
+            
+            self.lstm = nn.LSTM(
+                input_size=latent_dim * 2, # average pooling (512) + max pooling (512) = 1024
+                hidden_size=lstm_hidden_dim,
+                num_layers=lstm_layers,
+                batch_first=True,
+                bidirectional=False
+            )
+            
+            self.fc = nn.Sequential(
+                nn.Linear(lstm_hidden_dim, 128),
+                nn.ReLU(inplace=True),
+                nn.Dropout(0.4),
+                nn.Linear(128, 1),
+                nn.Sigmoid()
+            )
+            
+        def forward(self, x):
+            # Input shape: (Batch, SequenceLength, Channels, Height, Width)
+            batch_size, seq_len, c, h, w = x.size()
+            
+            # Reshape input to (Batch * SequenceLength, Channels, Height, Width) to pass through CNN
+            x = x.view(batch_size * seq_len, c, h, w)
+            
+            # CNN feature extraction
+            features = self.cnn(x)
+            avg_feat = self.avgpool(features)
+            max_feat = self.maxpool(features)
+            features = torch.cat([avg_feat, max_feat], dim=1)
+            features = features.view(batch_size * seq_len, -1)
+            
+            # Reshape back to sequence form: (Batch, SequenceLength, FeatureDim)
+            features = features.view(batch_size, seq_len, -1)
+            
+            # LSTM processing
+            lstm_out, (hn, cn) = self.lstm(features)
+            
+            # Take final sequence step hidden state
+            out = lstm_out[:, -1, :]
+            
+            # Classifier prediction
+            return self.fc(out)
 else:
     class DeepfakeDetector:  # type: ignore[no-redef]
         """Stub when PyTorch is unavailable"""
+        pass
+    class MultiClassDetector:
+        pass
+    class CNNLSTMDetector:
         pass
 
 
@@ -352,9 +418,12 @@ class ModelUtils:
             }
         else:
             # Binary prediction
-            # Since model was trained with 0=Fake, 1=Real, the sigmoid output
-            # represents probability of being Real. Therefore, the probability
-            # of being Fake is 1.0 - output.item().
+            # WARNING: Check which script trained the binary model weights (xception_deepfake.pth).
+            # - train_deeperforensics.py streams HF dataset and uses: 0 = Fake, 1 = Real.
+            #   For this model, the sigmoid output represents the probability of being Real,
+            #   so the probability of being Fake is 1.0 - output.item().
+            # - train.py uses: 0 = Real, 1 = Fake (EfficientNet pattern).
+            # The logic below assumes the model was trained with the train_deeperforensics.py mapping (0 = Fake, 1 = Real).
             confidence_raw = 1.0 - output.item()
             
             # Determine prediction

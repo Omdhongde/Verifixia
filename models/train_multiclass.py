@@ -435,6 +435,25 @@ def main():
             patience_counter += 1
             print(f"[Info] No improvement ({patience_counter}/{patience})")
         
+        # Save training history and info at each epoch to enable resumeability
+        try:
+            with open(history_path, 'w') as f:
+                json.dump(history, f, indent=2)
+            model_info = {
+                "architecture": "Multi-Class Detector (Real/Deepfake/AI-Generated)",
+                "total_parameters": total_params,
+                "input_shape": [3, 299, 299],
+                "output": "3-class (0=Real, 1=Deepfake, 2=AIGenerated)",
+                "framework": "PyTorch",
+                "device_trained": str(device),
+                "best_accuracy": float(best_accuracy),
+                "timestamp": datetime.now().isoformat()
+            }
+            with open(info_path, 'w') as f:
+                json.dump(model_info, f, indent=2)
+        except Exception as se:
+            print(f"[Warning] Could not auto-save epoch stats: {se}")
+        
         # Early stopping check disabled to train full 50 epochs
         if patience_counter >= patience:
             print(f"\n[Stop] Early stopping triggered after {epoch+1} epochs")
