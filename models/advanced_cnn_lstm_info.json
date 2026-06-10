@@ -1,0 +1,11 @@
+{
+  "model_name": "Verifixia Advanced 3-Tier Video Deepfake Detector",
+  "epochs_trained": 30,
+  "test_accuracy": 0.8,
+  "test_precision": 0.8,
+  "test_recall": 1.0,
+  "test_f1": 0.8888888888888888,
+  "timestamp": "2026-06-10T23:32:46.372811",
+  "framework": "PyTorch",
+  "device": "cpu"
+}

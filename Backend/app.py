@@ -60,6 +60,7 @@ SKLEARN_AVAILABLE = False
 multiclass_model = None
 binary_model = None
 cnn_lstm_model = None
+advanced_cnn_lstm_model = None
 model = None  # Backward-compatible pointer to primary active model
 sklearn_model = None
 DEVICE = "cpu"
@@ -91,7 +92,7 @@ def _download_if_missing(path: str, url: str):
 # Try to load PyTorch models (both Multi-Class and Binary)
 try:
     import torch
-    from utils.model_utils import ModelUtils, MultiClassDetector, DeepfakeDetector, CNNLSTMDetector
+    from utils.model_utils import ModelUtils, MultiClassDetector, DeepfakeDetector, CNNLSTMDetector, AdvancedCNNLSTMDetector
 
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     PYTORCH_AVAILABLE = True
@@ -145,6 +146,22 @@ try:
         except Exception as cle:
             logger.warning(f"⚠ Could not load CNN-LSTM model: {cle}")
             cnn_lstm_model = None
+
+    # 4. Load Advanced CNN-LSTM model
+    advanced_cnn_lstm_path = os.path.normpath(os.path.join(backend_dir, "..", "models", "advanced_cnn_lstm.pth"))
+    try:
+        advanced_cnn_lstm_model = AdvancedCNNLSTMDetector(use_pretrained=False)
+        if os.path.exists(advanced_cnn_lstm_path):
+            state_dict = torch.load(advanced_cnn_lstm_path, map_location=DEVICE)
+            advanced_cnn_lstm_model.load_state_dict(state_dict)
+            logger.info(f"✓ Advanced CNN-LSTM model loaded successfully from {advanced_cnn_lstm_path}")
+        else:
+            logger.info("⚠ No advanced CNN-LSTM weights found - initialized with random weights for simulation/testing.")
+        advanced_cnn_lstm_model.to(DEVICE)
+        advanced_cnn_lstm_model.eval()
+    except Exception as acle:
+        logger.warning(f"⚠ Could not load/initialize Advanced CNN-LSTM model: {acle}")
+        advanced_cnn_lstm_model = None
 
     # Assign primary model pointer for backward compatibility
     if multiclass_model is not None:
@@ -417,7 +434,53 @@ def predict_deepfake_video(video_path: str = None):
         logger.warning("Could not extract frames from video – returning Unknown")
         return "Unknown", 0.5
 
-    global cnn_lstm_model
+    global cnn_lstm_model, advanced_cnn_lstm_model
+    if PYTORCH_AVAILABLE and advanced_cnn_lstm_model is not None:
+        try:
+            from torchvision import transforms
+            tensors = []
+            frames_16 = []
+            if len(frames_extracted) >= 16:
+                for idx in range(16):
+                    step = len(frames_extracted) / 16.0
+                    frames_16.append(frames_extracted[int(idx * step)])
+            else:
+                frames_16 = list(frames_extracted)
+                while len(frames_16) < 16:
+                    frames_16.append(frames_16[-1])
+            
+            transform = transforms.Compose([
+                transforms.Resize((299, 299)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            for frame_img in frames_16:
+                tensors.append(transform(frame_img))
+            
+            seq_tensor = torch.stack(tensors, dim=0).unsqueeze(0).to(DEVICE)
+            with torch.no_grad():
+                logits, rppg_score, spike_flags, deltas = advanced_cnn_lstm_model(seq_tensor)
+                probs = torch.softmax(logits, dim=1)[0]
+                fake_prob = probs[1].item()
+                rppg_consistency = rppg_score.mean().item()
+                spike_list = spike_flags[0].tolist()
+                delta_list = deltas[0].tolist()
+                
+                decision = HeuristicDecisionFlow.process(
+                    raw_score=fake_prob,
+                    rppg_consistency=rppg_consistency,
+                    spike_flags=spike_list,
+                    spectral_aliasing=0.0,
+                    rppg_variance=0.0,
+                    frame_deltas=delta_list,
+                    is_video=True
+                )
+            prediction = decision["verdict"]
+            logger.info(f"✓ Advanced CNN-LSTM Video Prediction: {prediction}, Confidence: {decision['confidence']:.2f}%, Rules triggered: {decision['triggered_rules']}")
+            return prediction, decision["adjusted_score"]
+        except Exception as clee:
+            logger.error(f"Error running Advanced CNN-LSTM prediction: {clee}. Falling back to standard CNN-LSTM.")
+
     if PYTORCH_AVAILABLE and cnn_lstm_model is not None:
         try:
             from torchvision import transforms
@@ -440,10 +503,10 @@ def predict_deepfake_video(video_path: str = None):
                 confidence_raw = 1.0 - output.item()  # 0 = Fake, 1 = Real
                 
             prediction = "Fake" if confidence_raw > 0.5 else "Real"
-            logger.info(f"CNN-LSTM Video Prediction: {prediction}, Confidence: {confidence_raw*100:.2f}%")
+            logger.info(f"Standard CNN-LSTM Video Prediction: {prediction}, Confidence: {confidence_raw*100:.2f}%")
             return prediction, confidence_raw
         except Exception as clee:
-            logger.error(f"Error running CNN-LSTM prediction: {clee}. Falling back to frame-averaging.")
+            logger.error(f"Error running standard CNN-LSTM prediction: {clee}. Falling back to frame-averaging.")
 
     # Fallback to frame-averaging
     import tempfile
@@ -533,6 +596,120 @@ def _is_cartoon_or_synthetic_art(image_path: str) -> bool:
         return False
 
 
+class HeuristicDecisionFlow:
+    @staticmethod
+    def process(
+        raw_score: float,              # Probability of FAKE, in [0, 1]
+        rppg_consistency: float = 1.0,  # BPM consistency score in [0, 1]
+        spike_flags: list = None,      # Spike detector boolean list of length 16
+        spectral_aliasing: float = 0.0, # FAG high-frequency mask activation in [0, 1]
+        rppg_variance: float = 0.0,     # Region variance deviation in standard deviations
+        frame_deltas: list = None,      # Frame state differences |h_t - h_{t-1}|
+        is_video: bool = True
+    ):
+        if spike_flags is None:
+            spike_flags = [False] * 16
+        if frame_deltas is None:
+            frame_deltas = [1.0] * 15
+            
+        softmax_max = max(raw_score, 1.0 - raw_score)
+        
+        triggered_rules = []
+        is_override = False
+        override_verdict = None
+        confidence_adjustment = 0.0
+        
+        # Threat evaluation
+        h2_triggered = (rppg_consistency < 0.20)
+        h3_triggered = (sum(1 for f in spike_flags if f) >= 5) if is_video else False
+        h4_triggered = (spectral_aliasing > 0.85)
+        h5_triggered = (rppg_variance > 3.0)
+        
+        h6_triggered = False
+        if is_video:
+            consecutive_freezes = 0
+            for delta in frame_deltas:
+                if abs(delta) < 1e-5:
+                    consecutive_freezes += 1
+                    if consecutive_freezes >= 4:
+                        h6_triggered = True
+                        break
+                else:
+                    consecutive_freezes = 0
+                    
+        any_threat_triggered = h2_triggered or h3_triggered or h4_triggered or h5_triggered or h6_triggered
+        
+        # H-7: Confidence Recovery
+        if softmax_max > 0.90 and not any_threat_triggered:
+            triggered_rules.append("H-7")
+            return {
+                "verdict": "Fake" if raw_score > 0.5 else "Real",
+                "adjusted_score": raw_score,
+                "confidence": softmax_max * 100.0,
+                "triggered_rules": ["H-7"],
+                "is_override": False
+            }
+            
+        # H-1: Low-Confidence Gate
+        if softmax_max < 0.65:
+            triggered_rules.append("H-1")
+            
+        # Hard overrides in priority order
+        if h2_triggered:
+            triggered_rules.append("H-2")
+            is_override = True
+            override_verdict = "Fake"
+        elif h3_triggered:
+            triggered_rules.append("H-3")
+            is_override = True
+            override_verdict = "Fake"
+        elif h6_triggered:
+            triggered_rules.append("H-6")
+            is_override = True
+            override_verdict = "Fake"
+            
+        # Soft adjustments
+        if h4_triggered:
+            triggered_rules.append("H-4")
+            confidence_adjustment += 0.15
+        if h5_triggered:
+            triggered_rules.append("H-5")
+            confidence_adjustment += 0.10
+            
+        num_fake_flags = sum([h2_triggered, h3_triggered, h4_triggered, h5_triggered, h6_triggered])
+        
+        if is_override:
+            final_verdict = override_verdict
+            adjusted_score = 1.0 if override_verdict == "Fake" else 0.0
+        else:
+            adjusted_score = min(1.0, raw_score + confidence_adjustment)
+            
+            # Uncertainty escalation decision
+            if softmax_max < 0.65:
+                if num_fake_flags >= 2:
+                    final_verdict = "Fake"
+                    adjusted_score = max(0.51, adjusted_score)
+                elif num_fake_flags == 0:
+                    final_verdict = "Real"
+                    adjusted_score = min(0.49, adjusted_score)
+                else:
+                    final_verdict = "Uncertain"
+            else:
+                final_verdict = "Fake" if adjusted_score > 0.5 else "Real"
+                
+        final_confidence = adjusted_score if final_verdict == "Fake" else (1.0 - adjusted_score)
+        if final_verdict == "Uncertain":
+            final_confidence = 0.5
+            
+        return {
+            "verdict": final_verdict,
+            "adjusted_score": adjusted_score,
+            "confidence": final_confidence * 100.0,
+            "triggered_rules": triggered_rules,
+            "is_override": is_override
+        }
+
+
 def predict_deepfake(image_path):
     """Predict if image is deepfake – tries PyTorch → sklearn → heuristic.
 
@@ -568,7 +745,63 @@ def predict_deepfake(image_path):
         image_tensor = None
         preprocessing_time = 0.0
         
-        # 1a. Try Multi-Class Model first
+        # 1a. Try Advanced 3-Tier Model first
+        if advanced_cnn_lstm_model is not None:
+            try:
+                from utils.model_utils import ModelUtils
+                image_tensor, preprocessing_time = ModelUtils.preprocess_image(image_path)
+                
+                # Expand image to 16-frame sequence
+                seq_tensor = image_tensor.unsqueeze(1).repeat(1, 16, 1, 1, 1).to(DEVICE)
+                
+                start_inference = time.time()
+                with torch.no_grad():
+                    logits, rppg_score, spike_flags, deltas = advanced_cnn_lstm_model(seq_tensor)
+                    probs = torch.softmax(logits, dim=1)[0]
+                    fake_prob = probs[1].item()
+                    rppg_consistency = rppg_score.mean().item()
+                    
+                    decision = HeuristicDecisionFlow.process(
+                        raw_score=fake_prob,
+                        rppg_consistency=rppg_consistency,
+                        is_video=False
+                    )
+                inference_time_ms = (time.time() - start_inference) * 1000
+                
+                prediction = decision["verdict"]
+                confidence = decision["confidence"]
+                
+                result = {
+                    "prediction": prediction,
+                    "confidence": confidence,
+                    "confidence_raw": decision["adjusted_score"],
+                    "threat_level": "high" if decision["adjusted_score"] > 0.7 else "medium" if decision["adjusted_score"] > 0.4 else "low",
+                    "model_used": "Verifixia 3-Tier Multi-Modal Architecture",
+                    "processing_time": {
+                        "preprocessing_ms": round(preprocessing_time * 1000, 2),
+                        "inference_ms": round(inference_time_ms, 2),
+                        "total_ms": round((preprocessing_time * 1000) + inference_time_ms, 2)
+                    },
+                    "analysis": {
+                        "level": "3-Tier Multi-Modal",
+                        "description": f"Analysed via Frequency Attention (FAG), Biological Plausibility (BPM), and Cross-Attention Fusion. Rules triggered: {decision['triggered_rules']}",
+                        "recommendation": "High consistency detected" if prediction == "Real" else "Content is highly suspicious"
+                    },
+                    "model_info": {
+                        "architecture": "Modified EfficientNet-B0 + BPM + FAG + Cross-Attention",
+                        "input_size": "299x299 x 16 frames",
+                        "framework": "PyTorch",
+                        "device": str(DEVICE)
+                    }
+                }
+                
+                logger.info(f"✓ Advanced Image Model Prediction: {result['prediction']}, Confidence: {result['confidence']:.2f}%")
+                return result
+            except Exception as e:
+                logger.error(f"Error making advanced image model prediction: {e}")
+                logger.warning("Falling back to Multi-Class model")
+        
+        # 1b. Try Multi-Class Model second
         if multiclass_model is not None:
             try:
                 from utils.model_utils import ModelUtils

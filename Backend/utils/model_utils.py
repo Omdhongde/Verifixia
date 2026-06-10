@@ -306,6 +306,214 @@ if _TORCH_AVAILABLE:
             
             # Classifier prediction
             return self.fc(out)
+
+    import torchvision.models as models
+
+    class FrequencyAttentionGate(nn.Module):
+        def __init__(self, in_channels=24):
+            super().__init__()
+            self.mask = nn.Parameter(torch.randn(1, 1, 56, 56))
+            self.conv1x1 = nn.Conv2d(in_channels * 2, in_channels, kernel_size=1)
+            
+        def forward(self, x):
+            mask = torch.sigmoid(self.mask)
+            if x.shape[2:] != mask.shape[2:]:
+                mask = nn.functional.interpolate(mask, size=x.shape[2:], mode='bilinear', align_corners=False)
+            masked_x = x * mask
+            fused = torch.cat([x, masked_x], dim=1)
+            out = self.conv1x1(fused)
+            return out
+
+    class BiologicalPlausibilityModule(nn.Module):
+        def __init__(self, in_channels=112):
+            super().__init__()
+            self.proj = nn.Conv2d(in_channels, 64, kernel_size=1) if in_channels != 64 else nn.Identity()
+            self.pool = nn.AdaptiveAvgPool2d((7, 7))
+            
+            self.regions = {
+                'forehead': [0.05, 0.30, 0.25, 0.70],
+                'left_cheek': [0.45, 0.15, 0.70, 0.45],
+                'right_cheek': [0.45, 0.55, 0.70, 0.85],
+                'nose_bridge': [0.30, 0.40, 0.55, 0.60],
+                'chin': [0.75, 0.35, 0.95, 0.65]
+            }
+            
+            self.correlation_mlp = nn.Sequential(
+                nn.Linear(25, 64),
+                nn.ReLU(inplace=True),
+                nn.Linear(64, 32),
+                nn.ReLU(inplace=True),
+                nn.Linear(32, 1),
+                nn.Sigmoid()
+            )
+            
+            self.bio_embed = nn.Sequential(
+                nn.Linear(5 * 3136, 128),
+                nn.ReLU(inplace=True),
+                nn.Linear(128, 32)
+            )
+            
+        def forward(self, x):
+            x_proj = self.proj(x)
+            
+            region_vecs = []
+            for name, box in self.regions.items():
+                h, w = x_proj.shape[2], x_proj.shape[3]
+                y_start = int(box[0] * h)
+                y_end = int(box[2] * h)
+                x_start = int(box[1] * w)
+                x_end = int(box[3] * w)
+                y_start = max(0, min(y_start, h - 1))
+                y_end = max(y_start + 1, min(y_end, h))
+                x_start = max(0, min(x_start, w - 1))
+                x_end = max(x_start + 1, min(x_end, w))
+                
+                crop = x_proj[:, :, y_start:y_end, x_start:x_end]
+                pooled = self.pool(crop)
+                flat = pooled.view(pooled.size(0), -1)
+                region_vecs.append(flat)
+                
+            V = torch.stack(region_vecs, dim=1)
+            
+            V_mean = V.mean(dim=2, keepdim=True)
+            V_std = V.std(dim=2, keepdim=True) + 1e-6
+            V_norm = (V - V_mean) / V_std
+            corr_matrix = torch.bmm(V_norm, V_norm.transpose(1, 2)) / 3136.0
+            
+            corr_flat = corr_matrix.view(corr_matrix.size(0), -1)
+            consistency_score = self.correlation_mlp(corr_flat)
+            
+            flat_concat = V.view(V.size(0), -1)
+            bio_emb = self.bio_embed(flat_concat)
+            
+            return consistency_score, bio_emb
+
+    class GradReverse(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, x):
+            return x.view_as(x)
+            
+        @staticmethod
+        def backward(ctx, grad_output):
+            return grad_output.neg()
+
+    class CrossAttentionFusion(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.proj_A = nn.Linear(512, 256)
+            self.proj_B = nn.Linear(320, 256)
+            self.proj_C = nn.Linear(32, 256)
+            self.cross_attn = nn.MultiheadAttention(embed_dim=256, num_heads=4, batch_first=True)
+            self.ln = nn.LayerNorm(256)
+            
+        def forward(self, A, B, C):
+            proj_a = self.proj_A(A).unsqueeze(1)
+            proj_b = self.proj_B(B).unsqueeze(1)
+            proj_c = self.proj_C(C).unsqueeze(1)
+            
+            keys_values = torch.cat([proj_b, proj_c], dim=1)
+            attn_out, _ = self.cross_attn(query=proj_a, key=keys_values, value=keys_values)
+            fused = self.ln(proj_a + attn_out).squeeze(1)
+            return fused
+
+    class AdvancedCNNLSTMDetector(nn.Module):
+        def __init__(self, use_pretrained=False):
+            super().__init__()
+            if use_pretrained:
+                weights = models.EfficientNet_B0_Weights.DEFAULT
+            else:
+                weights = None
+            
+            efficientnet = models.efficientnet_b0(weights=weights)
+            features = efficientnet.features
+            
+            self.stage1 = nn.Sequential(
+                features[0],
+                features[1],
+                features[2],
+            )
+            self.fag = FrequencyAttentionGate(in_channels=24)
+            
+            self.stage2 = nn.Sequential(
+                features[3],
+                features[4],
+                features[5],
+            )
+            self.bpm = BiologicalPlausibilityModule(in_channels=112)
+            
+            self.stage3 = nn.Sequential(
+                features[6],
+                features[7],
+            )
+            self.head_conv = features[8]
+            self.compress_head = nn.Conv2d(1280, 640, kernel_size=1)
+            
+            self.avgpool = nn.AdaptiveAvgPool2d(1)
+            
+            self.lstm1 = nn.LSTM(input_size=672, hidden_size=512, batch_first=True, bidirectional=False)
+            self.dropout1 = nn.Dropout(0.3)
+            self.lstm2 = nn.LSTM(input_size=512, hidden_size=256, batch_first=True, bidirectional=True)
+            self.dropout2 = nn.Dropout(0.3)
+            
+            self.temporal_self_attn = nn.MultiheadAttention(embed_dim=512, num_heads=8, batch_first=True)
+            self.layer_norm_self_attn = nn.LayerNorm(512)
+            
+            self.theta = nn.Parameter(torch.tensor(0.5))
+            self.fusion = CrossAttentionFusion()
+            
+            self.verdict_layer = nn.Sequential(
+                nn.Linear(256, 128),
+                nn.ReLU(inplace=True),
+                nn.Dropout(0.4),
+                nn.Linear(128, 64),
+                nn.ReLU(inplace=True),
+                nn.Linear(64, 2)
+            )
+            
+        def forward(self, x):
+            batch_size, seq_len, c, h, w = x.size()
+            x_flat = x.view(batch_size * seq_len, c, h, w)
+            
+            feat1 = self.stage1(x_flat)
+            feat1 = self.fag(feat1)
+            
+            feat2 = self.stage2(feat1)
+            consistency_score, bio_emb = self.bpm(feat2)
+            
+            feat3 = self.stage3(feat2)
+            
+            anomaly_feat = GradReverse.apply(feat3)
+            anomaly_feat = self.avgpool(anomaly_feat).view(batch_size * seq_len, -1)
+            
+            head_feat = self.head_conv(feat3)
+            head_feat = self.compress_head(head_feat)
+            spatial_vec = self.avgpool(head_feat).view(batch_size * seq_len, -1)
+            
+            spatial_bio_vec = torch.cat([spatial_vec, bio_emb], dim=1)
+            
+            seq_features = spatial_bio_vec.view(batch_size, seq_len, -1)
+            
+            lstm_out1, _ = self.lstm1(seq_features)
+            lstm_out1 = self.dropout1(lstm_out1)
+            
+            lstm_out2, _ = self.lstm2(lstm_out1)
+            lstm_out2 = self.dropout2(lstm_out2)
+            
+            attn_out, _ = self.temporal_self_attn(lstm_out2, lstm_out2, lstm_out2)
+            attn_out = self.layer_norm_self_attn(lstm_out2 + attn_out)
+            
+            deltas = torch.norm(attn_out[:, 1:] - attn_out[:, :-1], p=2, dim=-1)
+            spike_flags = deltas > self.theta
+            
+            query = attn_out[:, -1, :]
+            
+            avg_anomaly = anomaly_feat.view(batch_size, seq_len, -1).mean(dim=1)
+            avg_bio_emb = bio_emb.view(batch_size, seq_len, -1).mean(dim=1)
+            
+            fused = self.fusion(query, avg_anomaly, avg_bio_emb)
+            logits = self.verdict_layer(fused)
+            
+            return logits, consistency_score, spike_flags, deltas
 else:
     class DeepfakeDetector:  # type: ignore[no-redef]
         """Stub when PyTorch is unavailable"""
@@ -313,6 +521,14 @@ else:
     class MultiClassDetector:
         pass
     class CNNLSTMDetector:
+        pass
+    class FrequencyAttentionGate:
+        pass
+    class BiologicalPlausibilityModule:
+        pass
+    class CrossAttentionFusion:
+        pass
+    class AdvancedCNNLSTMDetector:
         pass
 
 
