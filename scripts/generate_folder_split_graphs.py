@@ -40,8 +40,7 @@ def plot_and_save(train_loss, train_acc, val_loss, val_acc, start_epoch, end_epo
     axs[1].set_xlabel("Epochs")
     axs[1].set_ylabel("Accuracy (%)")
     axs[1].set_xlim([start_epoch, end_epoch])
-    # Set y-axis to 0-100 for accuracy to be standard
-    axs[1].set_ylim([0, 105])
+    # Removing hardcoded y-axis limits allows matplotlib to auto-scale, making small improvements visible!
     if epochs:
         axs[1].legend()
     axs[1].grid(True, linestyle="--", alpha=0.7)
