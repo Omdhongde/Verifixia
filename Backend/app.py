@@ -150,15 +150,16 @@ try:
     # 4. Load Advanced CNN-LSTM model
     advanced_cnn_lstm_path = os.path.normpath(os.path.join(backend_dir, "..", "models", "advanced_cnn_lstm.pth"))
     try:
-        advanced_cnn_lstm_model = AdvancedCNNLSTMDetector(use_pretrained=False)
         if os.path.exists(advanced_cnn_lstm_path):
+            advanced_cnn_lstm_model = AdvancedCNNLSTMDetector(use_pretrained=False)
             state_dict = torch.load(advanced_cnn_lstm_path, map_location=DEVICE)
             advanced_cnn_lstm_model.load_state_dict(state_dict)
+            advanced_cnn_lstm_model.to(DEVICE)
+            advanced_cnn_lstm_model.eval()
             logger.info(f"✓ Advanced CNN-LSTM model loaded successfully from {advanced_cnn_lstm_path}")
         else:
-            logger.info("⚠ No advanced CNN-LSTM weights found - initialized with random weights for simulation/testing.")
-        advanced_cnn_lstm_model.to(DEVICE)
-        advanced_cnn_lstm_model.eval()
+            logger.info("⚠ No advanced CNN-LSTM weights found - advanced model disabled, falling back to MultiClass.")
+            advanced_cnn_lstm_model = None
     except Exception as acle:
         logger.warning(f"⚠ Could not load/initialize Advanced CNN-LSTM model: {acle}")
         advanced_cnn_lstm_model = None
