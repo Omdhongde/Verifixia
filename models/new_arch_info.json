@@ -1,0 +1,40 @@
+{
+  "architecture": "Verifixia 3-Tier New Architecture \u2014 Image Mode",
+  "tier1": "MobileNetV2 (frozen) + Frequency Attention Gate (1280ch)",
+  "tier2": "Skipped (image mode \u2014 temporal LSTM requires video sequences)",
+  "tier3": "Verdict Head FC(1280\u2192512\u2192256\u21923) + BN + Dropout(0.45/0.30)",
+  "num_classes": 3,
+  "class_names": [
+    "Real",
+    "Deepfake",
+    "AIGenerated"
+  ],
+  "class_mapping": {
+    "Real": 0,
+    "Deepfake": 1,
+    "AIGenerated": 2,
+    "Fake(\u2192Deepfake)": 1
+  },
+  "total_params": 4654339,
+  "trainable_params": 2430467,
+  "input_shape": [
+    3,
+    160,
+    160
+  ],
+  "epochs_trained": 12,
+  "best_val_accuracy": 0.9044444444444445,
+  "label_smoothing": 0.1,
+  "dropout": [
+    0.45,
+    0.3
+  ],
+  "weight_decay": 0.0001,
+  "learning_rate": 0.003,
+  "batch_size": 64,
+  "scheduler": "CosineAnnealingLR (T_max=30, eta_min=1e-5)",
+  "framework": "PyTorch",
+  "device": "cpu",
+  "timestamp": "2026-06-12T15:45:29.480412",
+  "model_file": "new_arch_detector.pth"
+}

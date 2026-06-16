@@ -289,8 +289,13 @@ def validate(model, val_loader, criterion, device):
 
 def main():
     import argparse
+    import sys
+    if sys.stdout.encoding.lower() != 'utf-8':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=80, help='Number of epochs to train')
+    parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
     parser.add_argument('--data_dir', default='../DATA', help='Path to dataset directory')
     args_parsed = parser.parse_args()

@@ -9,6 +9,6 @@
   "output": "3-class (0=Real, 1=Deepfake, 2=AIGenerated)",
   "framework": "PyTorch",
   "device_trained": "cpu",
-  "best_accuracy": 0.8488178488178488,
-  "timestamp": "2026-06-06T13:28:04.896578"
+  "best_accuracy": 0.9044289044289044,
+  "timestamp": "2026-06-16T04:54:47.483492"
 }
