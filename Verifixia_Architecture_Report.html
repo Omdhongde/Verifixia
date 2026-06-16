@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Verifixia — AI Model Architecture Report</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    /* ── Cover Page ──────────────────────────────────────────────── */
+    .cover {
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 60px 40px;
+      page-break-after: always;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cover::before {
+      content: '';
+      position: absolute;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.15) 0%, transparent 70%);
+      top: -100px;
+      left: -100px;
+    }
+
+    .cover::after {
+      content: '';
+      position: absolute;
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(139, 92, 246, 0.15) 0%, transparent 70%);
+      bottom: -50px;
+      right: -50px;
+    }
+
+    .cover-badge {
+      background: rgba(56, 189, 248, 0.2);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: #38bdf8;
+      padding: 6px 18px;
+      border-radius: 50px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cover h1 {
+      font-size: 48px;
+      font-weight: 800;
+      margin-bottom: 8px;
+      position: relative;
+      z-index: 1;
+      background: linear-gradient(135deg, #ffffff, #94d2fd);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .cover h2 {
+      font-size: 20px;
+      font-weight: 400;
+      color: #94a3b8;
+      margin-bottom: 48px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cover-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      max-width: 700px;
+      margin: 0 auto 48px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cover-stat {
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 20px 16px;
+      text-align: center;
+    }
+
+    .cover-stat .num {
+      font-size: 28px;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+
+    .cover-stat .lbl {
+      font-size: 11px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 4px;
+    }
+
+    .cover-meta {
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 32px;
+      color: #64748b;
+      font-size: 13px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cover-meta span {
+      margin: 0 16px;
+    }
+
+    /* ── Content ──────────────────────────────────────────────────── */
+    .content {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 48px 32px;
+    }
+
+    /* ── Section Header ──────────────────────────────────────────── */
+    .section {
+      margin-bottom: 48px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 22px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+
+    .section-title .icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .icon-blue {
+      background: #eff6ff;
+    }
+
+    .icon-green {
+      background: #f0fdf4;
+    }
+
+    .icon-amber {
+      background: #fffbeb;
+    }
+
+    .icon-purple {
+      background: #faf5ff;
+    }
+
+    /* ── Status Banner ───────────────────────────────────────────── */
+    .banner {
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+
+    .banner-green {
+      background: #f0fdf4;
+      border-left: 4px solid #22c55e;
+      color: #166534;
+    }
+
+    .banner-amber {
+      background: #fffbeb;
+      border-left: 4px solid #f59e0b;
+      color: #92400e;
+    }
+
+    .banner-blue {
+      background: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      color: #1e3a8a;
+    }
+
+    /* ── Tables ──────────────────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      background: white;
+    }
+
+    thead tr {
+      background: #1e293b;
+      color: white;
+    }
+
+    thead th {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #f8fafc;
+    }
+
+    tbody td {
+      padding: 11px 16px;
+      font-size: 13px;
+      vertical-align: top;
+    }
+
+    .prop-col {
+      font-weight: 600;
+      color: #374151;
+      white-space: nowrap;
+      width: 35%;
+    }
+
+    /* ── Comparison Cards ────────────────────────────────────────── */
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .model-card {
+      border-radius: 12px;
+      padding: 24px;
+      border: 2px solid;
+      background: white;
+    }
+
+    .model-card.active {
+      border-color: #22c55e;
+      background: #f0fdf4;
+    }
+
+    .model-card.future {
+      border-color: #f59e0b;
+      background: #fffbeb;
+    }
+
+    .model-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .model-card.active h3 {
+      color: #166534;
+    }
+
+    .model-card.future h3 {
+      color: #92400e;
+    }
+
+    .model-card .subtitle {
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 16px;
+    }
+
+    .model-card .kv {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      font-size: 13px;
+    }
+
+    .model-card .kv:last-child {
+      border: none;
+    }
+
+    .model-card .kv .v {
+      font-weight: 600;
+    }
+
+    /* ── Epoch Table ─────────────────────────────────────────────── */
+    .epoch-row-best {
+      background: #f0fdf4 !important;
+    }
+
+    .gap-ok {
+      color: #16a34a;
+      font-weight: 600;
+    }
+
+    /* ── Code Block ──────────────────────────────────────────────── */
+    .code-block {
+      background: #0f172a;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+      overflow-x: auto;
+    }
+
+    .code-block pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      color: #e2e8f0;
+      line-height: 1.8;
+      white-space: pre;
+    }
+
+    .kw {
+      color: #c084fc;
+    }
+
+    .nm {
+      color: #fbbf24;
+    }
+
+    /* ── System Architecture ─────────────────────────────────────── */
+    .sys-layers {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .sys-layer {
+      border-radius: 10px;
+      padding: 18px 20px;
+      border: 1px solid;
+    }
+
+    .sys-layer h4 {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .sys-layer ul {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .sys-layer ul li {
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .layer-fe {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+    }
+
+    .layer-fe h4 {
+      color: #1d4ed8;
+    }
+
+    .layer-be {
+      background: #f0fdf4;
+      border-color: #bbf7d0;
+    }
+
+    .layer-be h4 {
+      color: #15803d;
+    }
+
+    .layer-ml {
+      background: #faf5ff;
+      border-color: #ddd6fe;
+    }
+
+    .layer-ml h4 {
+      color: #7c3aed;
+    }
+
+    .layer-db {
+      background: #fff7ed;
+      border-color: #fed7aa;
+    }
+
+    .layer-db h4 {
+      color: #c2410c;
+    }
+
+    /* ── Print ───────────────────────────────────────────────────── */
+    @media print {
+      body {
+        background: white;
+      }
+
+      .cover {
+        min-height: 100vh;
+        padding: 80px 60px;
+        page-break-after: always;
+      }
+
+      .print-btn {
+        display: none;
+      }
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      padding: 20px 32px 0;
+      max-width: 900px;
+      margin: 0 auto;
+      color: #94a3b8;
+      font-size: 12px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .print-btn {
+      position: fixed;
+      bottom: 32px;
+      right: 32px;
+      background: #0f172a;
+      color: white;
+      border: none;
+      border-radius: 50px;
+      padding: 14px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      z-index: 1000;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="cover">
+    <div class="cover-badge">Final Year Project — Technical Report</div>
+    <h1>Verifixia</h1>
+    <h2>Comprehensive Multi-Tier AI Deepfake Detection System</h2>
+    <div class="cover-grid">
+      <div class="cover-stat">
+        <div class="num">3</div>
+        <div class="lbl">Tiers of Detection</div>
+      </div>
+      <div class="cover-stat">
+        <div class="num">12.9M</div>
+        <div class="lbl">Primary Parameters</div>
+      </div>
+      <div class="cover-stat">
+        <div class="num">~74%</div>
+        <div class="lbl">Honest Val Accuracy</div>
+      </div>
+      <div class="cover-stat">
+        <div class="num">50</div>
+        <div class="lbl">Epochs Trained</div>
+      </div>
+      <div class="cover-stat">
+        <div class="num">&lt;1%</div>
+        <div class="lbl">Train/Val Gap</div>
+      </div>
+      <div class="cover-stat">
+        <div class="num">PyTorch</div>
+        <div class="lbl">Core Framework</div>
+      </div>
+    </div>
+    <div class="cover-meta">
+      <span>📅 June 2026</span>
+      <span>🔬 Multi-Class / Binary / Video / SVM / Heuristic</span>
+    </div>
+  </div>
+
+  <div class="page-header">
+    <strong>Verifixia — Comprehensive Architecture Report</strong>
+    <span>June 2026 | Full Multi-Tier System</span>
+  </div>
+
+  <div class="content">
+
+    <!-- ── 1. Pipeline Overview ──────────────────────────────────────── -->
+    <div class="section">
+      <div class="section-title">
+        <div class="icon icon-blue">🌊</div>1. Detection Pipeline Overview
+      </div>
+      <div class="banner banner-blue"><span>Verifixia operates a multi-tier detection pipeline designed to maximize
+          processing efficiency. Requests pass through automated pre-checks before deep learning, with seamless cascades
+          down to alternative classifiers.</span></div>
+      <div class="code-block">
+        <pre>[Upload/Stream] --> [Cartoon/Art Pre-check (PIL)] --(If Synthetic)--> [Fake (90%)]
+      |
+(If Photographic)
+      v
+[Tier 1: PyTorch Models] -----------------------> [Multi-Class / Binary prediction]
+      |
+(If Error / Missing)
+      v
+[Tier 2: scikit-learn SVM (HOG+Color)] ---------> [Prediction & Threat Score]
+      |
+(If Error / Missing)
+      v
+[Tier 3: Contrast & Brightness Heuristic] ------> [Final Fallback Prediction]</pre>
+      </div>
+    </div>
+
+    <!-- ── 2. Active Model ──────────────────────────────────────────── -->
+    <div class="section">
+      <div class="section-title">
+        <div class="icon icon-green">🧠</div>2. Multi-Class Image Detector (Primary Tier 1)
+      </div>
+      <div class="banner banner-green"><span>The primary deep learning model is a custom 3-class classifier designed to
+          separate authentic media from manipulations (AI synthesis vs. classical splicing).</span></div>
+      <table>
+        <tbody>
+          <tr>
+            <td class="prop-col">Model File</td>
+            <td><code>models/multiclass_detector.pth</code></td>
+          </tr>
+          <tr>
+            <td class="prop-col">Architecture</td>
+            <td>Custom ResNet-style CNN with Squeeze-Excitation (SE) Attention Blocks</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Target Classes</td>
+            <td>3 classes: 0 = Real, 1 = Deepfake, 2 = AI-Generated</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Total Parameters</td>
+            <td>12,975,675 (~12.9M)</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Input Dimensions</td>
+            <td>3 channels × 299 × 299 pixels</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Classification Head</td>
+            <td>Linear bottleneck head (1024 → 512 → 256 → 3) with Dropout</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Peak Val Accuracy</td>
+            <td>~74% (stable honest accuracy)</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Train/Val Gap</td>
+            <td>&lt;1% throughout — <strong>no overfitting</strong></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4 style="margin: 30px 0 10px;">Training History (50 Epochs)</h4>
+      <table>
+        <thead>
+          <tr>
+            <th>Epoch</th>
+            <th>Train Acc</th>
+            <th>Val Acc</th>
+            <th>Gap</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>48.1%</td>
+            <td>49.5%</td>
+            <td class="gap-ok">1.4%</td>
+            <td>Learning</td>
+          </tr>
+          <tr>
+            <td>10</td>
+            <td>58.7%</td>
+            <td>60.9%</td>
+            <td class="gap-ok">2.2%</td>
+            <td>Learning</td>
+          </tr>
+          <tr>
+            <td>30</td>
+            <td>69.4%</td>
+            <td>70.5%</td>
+            <td class="gap-ok">1.1%</td>
+            <td>Stable</td>
+          </tr>
+          <tr>
+            <td>40</td>
+            <td>71.7%</td>
+            <td>72.2%</td>
+            <td class="gap-ok">0.5%</td>
+            <td>Converging</td>
+          </tr>
+          <tr class="epoch-row-best">
+            <td><strong>50</strong></td>
+            <td><strong>72.2%</strong></td>
+            <td><strong>72.1%</strong></td>
+            <td class="gap-ok"><strong>0.1%</strong></td>
+            <td><strong>Final Optimal</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── 3. Model Comparison ──────────────────────────────────────── -->
+    <div class="section">
+      <div class="section-title">
+        <div class="icon icon-amber">⚖️</div>3. Architecture Comparison (Old vs New)
+      </div>
+      <div class="banner banner-amber"><span>A new experimental architecture was tested but exhibited strong overfitting
+          (7–8% train/val gap) due to memorization by the powerful frozen backbone. The custom ResNet-SE (Active Model)
+          remains the production standard.</span></div>
+
+      <div class="compare-grid">
+        <div class="model-card active">
+          <h3>✅ MultiClassDetector</h3>
+          <div class="subtitle">ACTIVE — models/multiclass_detector.pth</div>
+          <div class="kv"><span>Backbone</span><span class="v">Custom ResNet-SE</span></div>
+          <div class="kv"><span>Train/Val Gap</span><span class="v">&lt;1% ✅ (Honest)</span></div>
+          <div class="kv"><span>Epochs</span><span class="v">50 full epochs</span></div>
+          <div class="kv"><span>Overfitting</span><span class="v">None ✅</span></div>
+        </div>
+        <div class="model-card future">
+          <h3>🔮 MobileNetV2 + FAG</h3>
+          <div class="subtitle">EXPERIMENTAL — models/new_arch_detector.pth</div>
+          <div class="kv"><span>Backbone</span><span class="v">MobileNetV2 (frozen)</span></div>
+          <div class="kv"><span>Train/Val Gap</span><span class="v">7–8% ⚠️ (Overfit)</span></div>
+          <div class="kv"><span>Epochs</span><span class="v">12 (Early stopped)</span></div>
+          <div class="kv"><span>Overfitting</span><span class="v">Yes ❌ (98% vs 90%)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 4. Binary Fallback ───────────────────────────────────────── -->
+    <div class="section">
+      <div class="section-title">
+        <div class="icon icon-purple">🔄</div>4. Binary Image Deepfake Detector (Tier 1 Fallback)
+      </div>
+      <p style="margin-bottom: 12px;">For binary verification, the platform contains an alternative Xception-based deep
+        learning model trained strictly on binary classification. It utilizes a similar custom attention architecture.
+      </p>
+      <table>
+        <tbody>
+          <tr>
+            <td class="prop-col">Architecture</td>
+            <td>Xception-based CNN / DeepfakeDetector with SE Attention blocks</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Target Output</td>
+            <td>Binary prediction: Real (0) or Fake/Deepfake (1)</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Total Parameters</td>
+            <td>12,975,161</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Classification Head</td>
+            <td>Sequential Dense layers (1024 → 512 → 256 → 1) with Sigmoid activation</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Weight File</td>
+            <td><code>models/xception_deepfake.pth</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── 5. Video Pipeline ────────────────────────────────────────── -->
+    <div class="section">
+      <div class="section-title">
+        <div class="icon icon-blue">🎥</div>5. Video Deepfake Detector (DeeperForensics)
+      </div>
+      <p style="margin-bottom: 12px;">The video pipeline handles dynamic content using a frame-sample aggregation
+        strategy, integrating facial localization and temporal analysis.</p>
+      <table>
+        <tbody>
+          <tr>
+            <td class="prop-col">Architecture</td>
+            <td>Advanced CNN-LSTM for temporal sequence analysis</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Face Extractor</td>
+            <td>OpenCV Haar Cascades (frontal face detection)</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Frame Sampling</td>
+            <td>Extracts up to 25 evenly-spaced frames from the video</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Aggregation Function</td>
+            <td>Frame-wise average of binary confidence scores</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Weight File</td>
+            <td><code>models/cnn_lstm_deepfake.pth</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── 6. Fallbacks ─────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="section-title">
+        <div class="icon icon-amber">🛡️</div>6. Non-GPU Fallback Classifiers (Tiers 2 & 3)
+      </div>
+      <p style="margin-bottom: 12px;">To guarantee high system availability and zero downtime on low-resource
+        environments (such as basic CPU nodes), Verifixia integrates non-deep-learning classifiers.</p>
+
+      <h4 style="margin: 20px 0 10px;">Tier 2 Fallback: scikit-learn SVM</h4>
+      <table>
+        <tbody>
+          <tr>
+            <td class="prop-col">Classifier Type</td>
+            <td>Support Vector Machine (SVM) with RBF Kernel</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Feature Set</td>
+            <td>Histogram of Oriented Gradients (HOG) + RGB/YCbCr color histograms + FFT spectrum</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Input Size</td>
+            <td>128 × 128 pixels (downscaled for fast feature extraction)</td>
+          </tr>
+          <tr>
+            <td class="prop-col">Saved Package File</td>
+            <td><code>models/deepfake_sklearn.pkl</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4 style="margin: 20px 0 10px;">Tier 3 Fallback: Heuristic Analysis</h4>
+      <p style="margin-bottom: 12px; font-size: 13px;">If both PyTorch and scikit-learn modules fail, the system runs
+        raw pixel statistics using standard Pillow libraries, evaluating absolute brightness offsets and standard
+        deviation contrast measurements.</p>
+
+      <h4 style="margin: 20px 0 10px;">Cartoon & Synthetic Art Detector (Pre-processing)</h4>
+      <p style="font-size: 13px;">A dedicated heuristic filter checks color variety and channel uniformity before heavy
+        processing. Since realistic deepfake models perform poorly on illustrated media, drawings are immediately
+        classified as Synthetic/Fake with 90% confidence, saving CPU/GPU resources.</p>
+    </div>
+
+    <!-- ── 7. System Architecture ────────────────────────────────────── -->
+    <div class="section">
+      <div class="section-title">
+        <div class="icon icon-blue">🖥️</div>7. Full System Architecture
+      </div>
+      <div class="sys-layers">
+        <div class="sys-layer layer-fe">
+          <h4>🌐 Frontend Layer — React.js</h4>
+          <ul>
+            <li>Dashboard</li>
+            <li>Analytics Page</li>
+            <li>uploadImage()</li>
+            <li>startWebcam()</li>
+          </ul>
+        </div>
+        <div class="sys-layer layer-be">
+          <h4>⚙️ Backend Layer — Flask REST API</h4>
+          <ul>
+            <li>POST /api/upload</li>
+            <li>GET /api/webcam/frame</li>
+            <li>Face Detection (OpenCV)</li>
+          </ul>
+        </div>
+        <div class="sys-layer layer-ml">
+          <h4>🤖 AI/ML Layer — PyTorch Models</h4>
+          <ul>
+            <li>MultiClassDetector (12.9M)</li>
+            <li>CNN-LSTM Video Model</li>
+            <li>SVM Fallback</li>
+          </ul>
+        </div>
+        <div class="sys-layer layer-db">
+          <h4>🗄️ Database Layer — PostgreSQL</h4>
+          <ul>
+            <li>users</li>
+            <li>analyses</li>
+            <li>face_detections</li>
+            <li>detection_logs</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+
+</body>
+
+</html>

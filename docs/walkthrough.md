@@ -43,11 +43,18 @@ The model was retrained on CPU for exactly **30 epochs**. The training loss decr
 ### 📈 Retraining Curves Graph
 Below are the plotted Loss and Accuracy progression curves over the exact 30 epochs:
 
-#### Video Classifier Training Curves
-![Video Retraining Curves Plot](models/video_training_history.png)
+#### Video Classifier Training Curves (Epochs 1 - 30)
+![Video Retraining Curves](../training_split_graphs/videos/epochs_1_30.png)
 
-#### Image Multiclass Classifier Training Curves
-![Image Retraining Curves Plot](models/multiclass_training_history.png)
+#### Image Multiclass Classifier Training Curves (Epochs 1 - 50)
+![Image Retraining Curves (1-50)](../training_split_graphs/images/epochs_1_50.png)
+
+#### Detailed Image Training Splits
+**Epochs 1 - 30**
+![Image Retraining Curves (1-30)](../training_split_graphs/images/epochs_1_30.png)
+
+**Epochs 31 - 50**
+![Image Retraining Curves (31-50)](../training_split_graphs/images/epochs_31_50.png)
 
 #### Combined Image & Video Training Dashboard
 ![Combined Image & Video Dashboard Plot](models/combined_training_history.png)
@@ -103,6 +110,9 @@ We executed fine-tuning retraining (**task-956**) for **50 epochs** on the stand
 
 * **Best Validation Accuracy**: **`73.16%`** (reached peak convergence at Epoch 45, saving the best weights to `multiclass_detector.pth`).
 
+#### 50-Epochs Training Convergence Graph
+![Multiclass Retraining Curves (1-50)](../training_split_graphs/images/epochs_1_50.png)
+
 ---
 
 ## 🔍 Accuracy Distribution & Test Verification
@@ -110,6 +120,8 @@ We executed fine-tuning retraining (**task-956**) for **50 epochs** on the stand
 Following retraining, we evaluated the model's predictions on 200 random samples from each dataset class to measure overall robustness:
 
 ### Test Set Accuracy Distribution (Sample Size: 200 per class)
+
+![Accuracy Distribution Graph](../training_split_graphs/images/accuracy_distribution.png)
 * **True Real Images**:
   * Predicted as **Real**: **`76.50%`** (153/200)
   * Predicted as **Deepfake**: **`14.00%`** (28/200)
