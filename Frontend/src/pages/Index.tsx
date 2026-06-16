@@ -125,6 +125,12 @@ const Index = () => {
   };
 
   const handleUploadMedia = async (file: File) => {
+    // ── Show preview IMMEDIATELY before backend responds ─────────────
+    const fileIsVideo = file.type.startsWith("video/");
+    const previewUrl = URL.createObjectURL(file);
+    setMediaSrc(previewUrl);
+    setMediaType(fileIsVideo ? "video" : "image");
+
     addLogEntry({
       message: `Upload received: "${file.name}". Running deepfake analysis...`,
       type: "info",
@@ -161,16 +167,7 @@ const Index = () => {
         setThreatLevel("warning");
       }
 
-      // If backend provided a public file URL, show it in the player
-      if (result?.file_url) {
-        setMediaSrc(result.file_url);
-        setMediaType(result.isVideo ? "video" : "image");
-      } else {
-        // Create a local blob URL for preview
-        const localUrl = URL.createObjectURL(file);
-        setMediaSrc(localUrl);
-        setMediaType(result?.isVideo ? "video" : "image");
-      }
+      // Media preview was already shown instantly — no need to recreate blob URL.
 
       addLogEntry({
         message: `Analysis complete for "${file.name}": ${prediction}`,

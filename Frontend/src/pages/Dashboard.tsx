@@ -144,8 +144,13 @@ export const Dashboard = () => {
 
   // Simulate monitoring activity
   useEffect(() => {
-    if (!isMonitoring || !!mediaSrc) {
+    if (!isMonitoring) {
       setThreatLevel("safe");
+      return;
+    }
+    // When uploaded media is being displayed, don't run simulated metrics
+    // and don't touch threatLevel (it was set by the real backend response).
+    if (mediaSrc) {
       return;
     }
 
@@ -209,13 +214,9 @@ export const Dashboard = () => {
     hydratePersistedLogs();
   }, [hydratePersistedLogs]);
 
-  useEffect(() => {
-    return () => {
-      if (currentObjectUrl) {
-        URL.revokeObjectURL(currentObjectUrl);
-      }
-    };
-  }, [currentObjectUrl]);
+  // Blob URL cleanup is handled by clearCurrentObjectUrl() and unmount only.
+  // Do NOT revoke on every currentObjectUrl change — that kills the URL
+  // before the <video>/<img> element can finish loading it.
 
   const handleStartStop = () => {
     setIsMonitoring(!isMonitoring);
@@ -261,6 +262,13 @@ export const Dashboard = () => {
       clearUploadedMedia();
     }
 
+    // ── Show preview IMMEDIATELY before backend responds ─────────────
+    const fileIsVideo = file.type.startsWith("video/");
+    const previewUrl = URL.createObjectURL(file);
+    setCurrentObjectUrl(previewUrl);
+    setMediaSrc(previewUrl);
+    setMediaType(fileIsVideo ? "video" : "image");
+
     addLogEntry({
       message: `Upload received: "${file.name}". Running deepfake analysis...`,
       type: "info",
@@ -287,6 +295,15 @@ export const Dashboard = () => {
       setLastFilename(result?.filename ?? file.name);
       setLastIsVideo(result?.isVideo === true);
       setLastThreatLevel(result?.threat_level);
+
+      // Update the live threat level based on the real backend prediction
+      if (prediction === "Fake" || prediction === "Deepfake") {
+        setThreatLevel("danger");
+      } else if (prediction === "Real") {
+        setThreatLevel("safe");
+      } else {
+        setThreatLevel("warning");
+      }
       setLastModelUsed(result?.model_used);
       setLastAnalysis(result?.analysis);
       setLastModelInfo(result?.model_info);
@@ -301,16 +318,8 @@ export const Dashboard = () => {
         });
       }
 
-      if (result?.file_url) {
-        clearCurrentObjectUrl();
-        setMediaSrc(result.file_url);
-        setMediaType(result.isVideo ? "video" : "image");
-      } else {
-        const localUrl = URL.createObjectURL(file);
-        setCurrentObjectUrl(localUrl);
-        setMediaSrc(localUrl);
-        setMediaType(result?.isVideo ? "video" : "image");
-      }
+      // Media preview was already shown instantly when the file was selected.
+      // No need to recreate the blob URL here.
 
       // Add detailed log entry
       const logMessage = result?.model_used 

@@ -28,7 +28,8 @@ CORS(app, origins=os.getenv("CORS_ORIGINS", default_cors_origins).split(","))
 
 # Configuration
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-key")
-app.config["UPLOAD_FOLDER"] = os.getenv("UPLOAD_FOLDER", "uploads")
+env_folder = os.getenv("UPLOAD_FOLDER", "uploads")
+app.config["UPLOAD_FOLDER"] = os.path.abspath(os.path.join(os.path.dirname(__file__), env_folder))
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", 16 * 1024 * 1024))  # 16MB
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif"}
 VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
@@ -391,17 +392,21 @@ def predict_deepfake_sklearn(image_path: str) -> dict:
 
 
 def predict_deepfake_video(video_path: str = None):
-    """Sequence-based prediction for video uploads using CNN-LSTM.
+    """Analyse a video by sampling frames and running each through the
+    working image model (multiclass or binary).
 
-    Extracts up to 25 evenly-spaced frames from the video, preprocesses them 
-    into a sequence tensor of shape (1, 25, 3, 299, 299), and queries the CNN-LSTM model.
-    Falls back to frame-averaging if CNN-LSTM is unavailable.
+    The CNN-LSTM model weights are non-functional (constant output ~0.41,
+    0% val precision/recall) so we bypass it entirely and use the proven
+    image classifier on evenly-spaced frames, then aggregate the per-frame
+    predictions via majority-vote + mean confidence.
     """
     if video_path is None or not os.path.exists(video_path):
         return "Unknown", 0.5
 
+    # ── 1. Extract frames ────────────────────────────────────────────
     frames_extracted = []
     try:
+        # Try PIL first (works for GIFs, some formats)
         try:
             with Image.open(video_path) as vid_img:
                 frames_extracted.append(vid_img.copy().convert("RGB"))
@@ -414,17 +419,21 @@ def predict_deepfake_video(video_path: str = None):
         except Exception:
             pass
 
+        # Fall back to OpenCV for real video files (mp4, avi, etc.)
         if not frames_extracted:
             try:
                 import cv2
                 cap = cv2.VideoCapture(video_path)
                 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 30
-                for idx in range(0, min(25, total), max(1, total // 25)):
+                step = max(1, total // 10)  # sample ~10 frames
+                for idx in range(0, total, step):
                     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                     ret, frame = cap.read()
                     if ret:
                         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         frames_extracted.append(Image.fromarray(rgb))
+                    if len(frames_extracted) >= 10:
+                        break
                 cap.release()
             except Exception:
                 pass
@@ -435,83 +444,12 @@ def predict_deepfake_video(video_path: str = None):
         logger.warning("Could not extract frames from video – returning Unknown")
         return "Unknown", 0.5
 
-    global cnn_lstm_model, advanced_cnn_lstm_model
-    if PYTORCH_AVAILABLE and advanced_cnn_lstm_model is not None:
-        try:
-            from torchvision import transforms
-            tensors = []
-            frames_16 = []
-            if len(frames_extracted) >= 16:
-                for idx in range(16):
-                    step = len(frames_extracted) / 16.0
-                    frames_16.append(frames_extracted[int(idx * step)])
-            else:
-                frames_16 = list(frames_extracted)
-                while len(frames_16) < 16:
-                    frames_16.append(frames_16[-1])
-            
-            transform = transforms.Compose([
-                transforms.Resize((299, 299)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
-            for frame_img in frames_16:
-                tensors.append(transform(frame_img))
-            
-            seq_tensor = torch.stack(tensors, dim=0).unsqueeze(0).to(DEVICE)
-            with torch.no_grad():
-                logits, rppg_score, spike_flags, deltas = advanced_cnn_lstm_model(seq_tensor)
-                probs = torch.softmax(logits, dim=1)[0]
-                fake_prob = probs[1].item()
-                rppg_consistency = rppg_score.mean().item()
-                spike_list = spike_flags[0].tolist()
-                delta_list = deltas[0].tolist()
-                
-                decision = HeuristicDecisionFlow.process(
-                    raw_score=fake_prob,
-                    rppg_consistency=rppg_consistency,
-                    spike_flags=spike_list,
-                    spectral_aliasing=0.0,
-                    rppg_variance=0.0,
-                    frame_deltas=delta_list,
-                    is_video=True
-                )
-            prediction = decision["verdict"]
-            logger.info(f"✓ Advanced CNN-LSTM Video Prediction: {prediction}, Confidence: {decision['confidence']:.2f}%, Rules triggered: {decision['triggered_rules']}")
-            return prediction, decision["adjusted_score"]
-        except Exception as clee:
-            logger.error(f"Error running Advanced CNN-LSTM prediction: {clee}. Falling back to standard CNN-LSTM.")
+    logger.info(f"Extracted {len(frames_extracted)} frames from video for analysis")
 
-    if PYTORCH_AVAILABLE and cnn_lstm_model is not None:
-        try:
-            from torchvision import transforms
-            tensors = []
-            while len(frames_extracted) < 25:
-                frames_extracted.append(frames_extracted[-1])
-            frames_extracted = frames_extracted[:25]
-            
-            transform = transforms.Compose([
-                transforms.Resize((299, 299)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
-            for frame_img in frames_extracted:
-                tensors.append(transform(frame_img))
-            
-            seq_tensor = torch.stack(tensors, dim=0).unsqueeze(0).to(DEVICE)
-            with torch.no_grad():
-                output = cnn_lstm_model(seq_tensor)
-                confidence_raw = 1.0 - output.item()  # 0 = Fake, 1 = Real
-                
-            prediction = "Fake" if confidence_raw > 0.5 else "Real"
-            logger.info(f"Standard CNN-LSTM Video Prediction: {prediction}, Confidence: {confidence_raw*100:.2f}%")
-            return prediction, confidence_raw
-        except Exception as clee:
-            logger.error(f"Error running standard CNN-LSTM prediction: {clee}. Falling back to frame-averaging.")
-
-    # Fallback to frame-averaging
+    # ── 2. Run each frame through the image model ────────────────────
     import tempfile
-    fake_scores = []
+    frame_predictions = []  # list of (prediction_str, confidence_0_to_1)
+
     for i, frame_img in enumerate(frames_extracted):
         try:
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
@@ -519,28 +457,45 @@ def predict_deepfake_video(video_path: str = None):
                 tmp_path = tmp.name
             frame_result = predict_deepfake(tmp_path)
             os.remove(tmp_path)
-            fake_scores.append(frame_result.get("confidence_raw", 0.5))
+
+            pred = frame_result.get("prediction", "Unknown")
+            conf_raw = frame_result.get("confidence_raw")
+            if conf_raw is None:
+                conf_pct = frame_result.get("confidence", 50.0)
+                conf_raw = conf_pct / 100.0 if conf_pct > 1 else conf_pct
+
+            frame_predictions.append((pred, conf_raw))
+            logger.info(f"  Frame {i+1}/{len(frames_extracted)}: {pred} ({conf_raw*100:.1f}%)")
         except Exception as e:
             logger.warning(f"Frame {i} prediction failed: {e}")
 
-    if not fake_scores:
+    if not frame_predictions:
         return "Unknown", 0.5
 
-    avg_score = sum(fake_scores) / len(fake_scores)
-    threshold = 0.5
-    try:
-        backend_dir = os.path.dirname(os.path.abspath(__file__))
-        info_path = os.path.join(backend_dir, "..", "models", "deeperforensics_info.json")
-        if os.path.exists(info_path):
-            with open(info_path, "r") as f:
-                info_data = json.load(f)
-            threshold = info_data.get("optimal_threshold", 0.5)
-            logger.info(f"Loaded optimal decision threshold {threshold} from deeperforensics_info.json")
-    except Exception as e:
-        logger.warning(f"Failed to load optimal threshold from deeperforensics_info.json: {e}")
+    # ── 3. Aggregate: majority vote + mean confidence ────────────────
+    fake_count = sum(1 for p, _ in frame_predictions if p in ("Fake", "Deepfake", "AIGenerated"))
+    real_count = sum(1 for p, _ in frame_predictions if p == "Real")
+    total_frames = len(frame_predictions)
 
-    prediction = "Fake" if avg_score > threshold else "Real"
-    return prediction, avg_score
+    fake_confidences = [c for p, c in frame_predictions if p in ("Fake", "Deepfake", "AIGenerated")]
+    real_confidences = [c for p, c in frame_predictions if p == "Real"]
+
+    if fake_count > real_count:
+        prediction = "Fake"
+        avg_conf = sum(fake_confidences) / len(fake_confidences) if fake_confidences else 0.7
+    elif real_count > fake_count:
+        prediction = "Real"
+        # UI expects absolute confidence (e.g. 0.91), not a fake score (0.09)
+        avg_conf = sum(real_confidences) / len(real_confidences) if real_confidences else 0.7
+    else:
+        # Tie — use mean confidence to break it
+        all_confs = [c for _, c in frame_predictions]
+        avg_conf = sum(all_confs) / len(all_confs)
+        prediction = "Fake" if avg_conf > 0.5 else "Real"
+
+    logger.info(f"Video Verdict: {prediction} | Fake frames: {fake_count}/{total_frames} | "
+                f"Real frames: {real_count}/{total_frames} | Score: {avg_conf*100:.1f}%")
+    return prediction, avg_conf
 
 def _is_cartoon_or_synthetic_art(image_path: str) -> bool:
     """Return True if the image looks like cartoon / anime / illustrated art.

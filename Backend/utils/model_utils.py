@@ -584,16 +584,57 @@ class ModelUtils:
 
     @staticmethod
     def preprocess_image(image_path: str, image_size: int = 299) -> Tuple[Any, float]:
-        """Preprocess image for model input and return preprocessing time"""
+        """Preprocess image for model input and return preprocessing time.
+        Automatically detects and crops the face, as the models were trained on faces.
+        Falls back to full image if no face is detected.
+        """
         start_time = time.time()
         
+        # Default to loading full image via PIL
+        image = None
+        
+        try:
+            import cv2
+            img_bgr = cv2.imread(image_path)
+            if img_bgr is not None:
+                gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                face_cascade = cv2.CascadeClassifier(cascade_path)
+                
+                if not face_cascade.empty():
+                    faces = face_cascade.detectMultiScale(
+                        gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
+                    )
+                    if len(faces) > 0:
+                        # Get the largest face
+                        faces = sorted(faces, key=lambda x: x[2]*x[3], reverse=True)
+                        x, y, w, h = faces[0]
+                        
+                        # Add slight padding
+                        pad_h = int(h * 0.15)
+                        pad_w = int(w * 0.15)
+                        y1 = max(0, y - pad_h)
+                        y2 = min(img_bgr.shape[0], y + h + pad_h)
+                        x1 = max(0, x - pad_w)
+                        x2 = min(img_bgr.shape[1], x + w + pad_w)
+                        
+                        face_crop = img_bgr[y1:y2, x1:x2]
+                        if face_crop.size > 0:
+                            img_rgb = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
+                            image = Image.fromarray(img_rgb)
+        except Exception as e:
+            print(f"Face crop failed, falling back to full image: {e}")
+            
+        # Fallback to full image if face cropping failed or wasn't found
+        if image is None:
+            image = Image.open(image_path).convert('RGB')
+            
         transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-        image = Image.open(image_path).convert('RGB')
         tensor = transform(image).unsqueeze(0)
         
         preprocessing_time = time.time() - start_time

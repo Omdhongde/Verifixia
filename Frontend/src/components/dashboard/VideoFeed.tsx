@@ -180,7 +180,7 @@ export const VideoFeed = ({ isMonitoring, threatLevel, mediaSrc, mediaType }: Vi
           mediaType === "image" ? (
             <img src={mediaSrc} alt="Uploaded media" className="absolute inset-0 w-full h-full object-cover" />
           ) : (
-            <video src={mediaSrc} className="absolute inset-0 w-full h-full object-cover" playsInline muted autoPlay loop />
+            <video key={mediaSrc} src={mediaSrc} className="absolute inset-0 w-full h-full object-cover" playsInline muted autoPlay loop />
           )
         ) : isMonitoring ? (
           <video
@@ -205,7 +205,7 @@ export const VideoFeed = ({ isMonitoring, threatLevel, mediaSrc, mediaType }: Vi
           </div>
         )}
 
-        {cameraError && (
+        {cameraError && !mediaSrc && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm text-white p-6">
             <div className="text-center flex flex-col items-center gap-3">
               <AlertTriangle className="w-8 h-8 text-yellow-500" />
