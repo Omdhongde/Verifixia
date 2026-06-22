@@ -655,7 +655,13 @@ class ModelUtils:
         if model_type == "multiclass":
             # Multi-class prediction
             logits = output
-            probabilities = torch.softmax(logits, dim=1)[0]
+            
+            # Apply Temperature Scaling to soften overconfident predictions
+            # T > 1.0 reduces confidence (e.g. 99.9% -> ~80-90%)
+            temperature = 2.5
+            scaled_logits = logits / temperature
+            
+            probabilities = torch.softmax(scaled_logits, dim=1)[0]
             predicted_class = torch.argmax(probabilities, dim=0).item()
             confidence = probabilities[predicted_class].item()
             
